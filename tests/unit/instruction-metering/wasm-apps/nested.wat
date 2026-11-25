@@ -14,6 +14,8 @@
     (func $call_back_and_swallow (param i32 i32) (result i32)))
   (import "env" "set_limit" (func $set_limit (param i32)))
   (import "env" "run_down" (func $run_down (param i32)))
+  (import "env" "leave" (func $leave (param i32 i32)))
+  (import "env" "look" (func $look))
   (memory 1)
   ;; how often a call_back_and_swallow has returned
   (global $returned (mut i32) (i32.const 0))
@@ -89,5 +91,18 @@
   (func (export "run_down_and_count") (param $left i32) (param $n i32)
     (result i32)
     (call $run_down (local.get $left))
+    (call $count (local.get $n)))
+
+  ;; have a native function leave this call `left` instructions to count
+  ;; down and `reserve` more beyond them, and count to n
+  (func (export "leave_and_count") (param $left i32) (param $reserve i32)
+    (param $n i32) (result i32)
+    (call $leave (local.get $left) (local.get $reserve))
+    (call $count (local.get $n)))
+
+  ;; have a native function look at what this call has left, and count
+  ;; to n
+  (func (export "look_and_count") (param $n i32) (result i32)
+    (call $look)
     (call $count (local.get $n)))
 )

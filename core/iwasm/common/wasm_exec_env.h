@@ -89,16 +89,17 @@ typedef struct WASMExecEnv {
 
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
     /* instructions to execute */
-    int instructions_to_execute;
-    /* What instructions_left starts again from when it has run out:
-       zero, which ends the call, if the call has a limit, and
-       INT32_MAX if it has none */
-    int32 instructions_refill;
+    int64 instructions_to_execute;
     /* What the outermost call into wasm code that is running on this
-       exec env has left of its instructions. The calls nested in it
-       share the count. A call without a limit counts down as well,
-       from INTPTR_MAX, which it gets to the end of where a machine
-       word has 32 bits. */
+       exec env has left of its instructions beyond instructions_left,
+       which is filled up from here when it has run out: a machine
+       word of 32 bits can't hold all of a limit. INT64_MAX if the call
+       has no limit, which is never used up. */
+    int64 instructions_reserve;
+    /* What the outermost call into wasm code that is running on this
+       exec env has left of its instructions, as far as a machine word
+       holds it. The calls nested in it share the count. A call without
+       a limit counts down as well, from INTPTR_MAX. */
     intptr_t instructions_left;
 #endif
 
@@ -322,15 +323,39 @@ wasm_exec_env_start_instruction_count(WASMExecEnv *exec_env,
 {
     /* Only the outermost call finds no frame in the exec env */
     if (!exec_env->cur_frame) {
-        if (limit_enforced && exec_env->instructions_to_execute >= 0) {
-            exec_env->instructions_left = exec_env->instructions_to_execute;
-            exec_env->instructions_refill = 0;
+        int64 limit = exec_env->instructions_to_execute;
+
+        if (limit_enforced && limit >= 0) {
+            exec_env->instructions_left =
+                limit < INTPTR_MAX ? (intptr_t)limit : INTPTR_MAX;
+            exec_env->instructions_reserve =
+                limit - exec_env->instructions_left;
         }
         else {
             exec_env->instructions_left = INTPTR_MAX;
-            exec_env->instructions_refill = INT32_MAX;
+            exec_env->instructions_reserve = INT64_MAX;
         }
     }
+}
+
+/**
+ * Fill up the count of the instructions that a call has left, when it
+ * has run out, from what the call has left beyond the count.
+ *
+ * @param exec_env the execution environment the call is made with
+ *
+ * @return what the count goes on with, 0 if the call has nothing left
+ */
+static inline intptr_t
+wasm_exec_env_refill_instruction_count(WASMExecEnv *exec_env)
+{
+    int64 reserve = exec_env->instructions_reserve;
+    intptr_t count = reserve < INTPTR_MAX ? (intptr_t)reserve : INTPTR_MAX;
+
+    /* A call without a limit doesn't use it up */
+    if (reserve != INT64_MAX)
+        exec_env->instructions_reserve = reserve - count;
+    return count;
 }
 #endif
 

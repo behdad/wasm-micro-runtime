@@ -765,7 +765,7 @@ cmake .. -DWAMR_BUILD_WASM_SPEC2=1 -DWAMR_BUILD_FAST_INTERP=0 -DWAMR_BUILD_AOT=0
 - **WAMR_BUILD_INSTRUCTION_METERING**=1/0, default to off.
 
 > [!NOTE]
-> This limits the number of instructions a wasm module instance can run. Call `wasm_runtime_set_instruction_count_limit(...)` before `wasm_runtime_call_*(...)` to enforce the cap: a call that reaches it ends with the exception "instruction limit exceeded".
+> This limits the number of instructions a wasm module instance can run. Call `wasm_runtime_set_instruction_count_limit(...)`, or `wasm_runtime_set_instruction_count_limit64(...)` for a limit that doesn't fit into an int, before `wasm_runtime_call_*(...)` to enforce the cap: a call that reaches it ends with the exception "instruction limit exceeded".
 
 > [!NOTE]
 > The limit is for each call that the host makes, together with the calls nested in it, which native functions or the runtime make on the same execution environment. The classic interpreter and the Fast JIT count every opcode that is executed. The fast interpreter counts the operations that the loader turns the opcodes into, which are fewer. An instruction counts as one whatever it does, and so does a call of a native function.

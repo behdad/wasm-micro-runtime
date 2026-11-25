@@ -7840,8 +7840,9 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
 
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
     instructions_ran_out:
-        /* A call without a limit starts the count again */
-        instructions_left = exec_env->instructions_refill;
+        /* The count is a machine word, which may not hold all that the
+           call has left, and a call without a limit starts it again */
+        instructions_left = wasm_exec_env_refill_instruction_count(exec_env);
         if (instructions_left <= 0) {
             wasm_set_exception(module, "instruction limit exceeded");
             goto got_exception;

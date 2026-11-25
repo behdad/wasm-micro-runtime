@@ -131,12 +131,34 @@ run_down(wasm_exec_env_t exec_env, int32_t left)
     exec_env->instructions_left = left;
 }
 
+/* Leave the call that is running so many instructions to count down, and
+   so many more beyond them, which the count is filled up from. This is
+   how a limit is kept that a machine word can't hold. */
+void
+leave(wasm_exec_env_t exec_env, int32_t left, int32_t reserve)
+{
+    exec_env->instructions_left = left;
+    exec_env->instructions_reserve = reserve;
+}
+
+/* What the call that is running had left when it called look() */
+int64_t seen_left;
+
+void
+look(wasm_exec_env_t exec_env)
+{
+    seen_left =
+        (int64_t)exec_env->instructions_left + exec_env->instructions_reserve;
+}
+
 NativeSymbol native_symbols[] = {
     { "call_back", (void *)call_back, "(ii)i", nullptr },
     { "call_back_and_swallow", (void *)call_back_and_swallow, "(ii)i",
       nullptr },
     { "set_limit", (void *)set_limit, "(i)", nullptr },
     { "run_down", (void *)run_down, "(i)", nullptr },
+    { "leave", (void *)leave, "(ii)", nullptr },
+    { "look", (void *)look, "()", nullptr },
 };
 
 /* How a call ended */
@@ -237,6 +259,14 @@ class InstructionLimitTestBase : public testing::Test
                 uint32_t *result)
     {
         wasm_runtime_set_instruction_count_limit(exec_env, limit);
+        return call(name, args, result);
+    }
+
+    /* Call an export under a limit that needn't fit into an int */
+    Ending call64(const char *name, std::vector<uint32_t> args, int64_t limit,
+                  uint32_t *result)
+    {
+        wasm_runtime_set_instruction_count_limit64(exec_env, limit);
         return call(name, args, result);
     }
 
@@ -704,6 +734,88 @@ TEST_P(InstructionLimitTest, limit_values)
 
     EXPECT_EQ(call("loop_br", { 100000 }, INT_MAX, &result), RETURNED);
     EXPECT_EQ(result, 100000u);
+}
+
+/* A limit that doesn't fit into an int */
+TEST_P(InstructionLimitTest, limit_of_64_bits)
+{
+    uint32_t result = 0;
+
+    LOAD_ENFORCED("nested.wasm");
+
+    int count = cost("count", { 1000 });
+
+    instantiate();
+    EXPECT_EQ(call64("count", { 1000 }, count - 1, &result), LIMIT_EXCEEDED);
+    EXPECT_EQ(call64("count", { 1000 }, count, &result), RETURNED);
+    EXPECT_EQ(result, 1000u);
+
+    /* It isn't cut down to an int, which would leave nothing of the first
+       of them and not enough of the second */
+    for (int64_t limit : { (int64_t)1 << 32, ((int64_t)1 << 32) + count - 1,
+                           (int64_t)INT_MAX + 1, INT64_MAX }) {
+        SCOPED_TRACE(limit);
+        EXPECT_EQ(call64("count", { 1000 }, limit, &result), RETURNED);
+        EXPECT_EQ(result, 1000u);
+    }
+
+    /* A negative limit is no limit */
+    for (int64_t limit : { (int64_t)-1, -((int64_t)1 << 32), INT64_MIN }) {
+        SCOPED_TRACE(limit);
+        EXPECT_EQ(call64("count", { 1000 }, limit, &result), RETURNED);
+        EXPECT_EQ(result, 1000u);
+    }
+
+    /* The call has all of the limit, less the few instructions before
+       the native function looks */
+    int64_t limit = ((int64_t)1 << 40) + 12345;
+
+    seen_left = 0;
+    EXPECT_EQ(call64("look_and_count", { 1000 }, limit, &result), RETURNED);
+    EXPECT_LT(seen_left, limit);
+    EXPECT_GT(seen_left, limit - 100);
+}
+
+/* The count is a machine word, which is filled up from what the call has
+   left beyond it. The code of the Fast JIT doesn't do that: it is for
+   targets with 64-bit words only, which hold all of a limit. */
+TEST_P(InstructionLimitTest, count_is_filled_up_from_what_is_left)
+{
+    uint32_t result = 0;
+
+    LOAD_ENFORCED("nested.wasm");
+    if (GetParam() != Mode_Interp) {
+        GTEST_SKIP() << "only the interpreters fill up the count";
+    }
+
+    /* What counting to 1000 takes after the native function */
+    uint32_t low = 0, high = 1000000;
+
+    ASSERT_EQ(call("leave_and_count", { low, 0, 1000 }, 1000000, &result),
+              LIMIT_EXCEEDED);
+    ASSERT_EQ(call("leave_and_count", { high, 0, 1000 }, 1000000, &result),
+              RETURNED);
+    while (high - low > 1) {
+        uint32_t middle = low + (high - low) / 2;
+
+        if (call("leave_and_count", { middle, 0, 1000 }, 1000000, &result)
+            == LIMIT_EXCEEDED)
+            low = middle;
+        else
+            high = middle;
+    }
+
+    /* It takes the same when a part of it is left beyond the count */
+    for (uint32_t left : { 0u, 1u, high / 2, high - 1 }) {
+        SCOPED_TRACE(left);
+        EXPECT_EQ(call("leave_and_count", { left, high - left, 1000 }, 1000000,
+                       &result),
+                  RETURNED);
+        EXPECT_EQ(result, 1000u);
+        EXPECT_EQ(call("leave_and_count", { left, high - left - 1, 1000 },
+                       1000000, &result),
+                  LIMIT_EXCEEDED);
+    }
 }
 
 /* Each call that the host makes has the whole limit, also after a call

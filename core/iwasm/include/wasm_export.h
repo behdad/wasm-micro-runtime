@@ -1988,6 +1988,21 @@ wasm_runtime_set_instruction_count_limit(wasm_exec_env_t exec_env,
                                          int instruction_count);
 
 /**
+ * Set the instruction count limit to the execution environment, like
+ * wasm_runtime_set_instruction_count_limit() does, for a limit that
+ * doesn't fit into an int.
+ *
+ * Note: this function is only available when the runtime is built with
+ * WAMR_BUILD_INSTRUCTION_METERING=1.
+ *
+ * @param exec_env the execution environment
+ * @param instruction_count the instruction count limit
+ */
+WASM_RUNTIME_API_EXTERN void
+wasm_runtime_set_instruction_count_limit64(wasm_exec_env_t exec_env,
+                                           int64_t instruction_count);
+
+/**
  * Check whether the instruction count limit, see
  * wasm_runtime_set_instruction_count_limit(), is enforced for the calls
  * that the host makes into a WASM module instance in the running mode

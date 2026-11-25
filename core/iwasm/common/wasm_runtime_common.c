@@ -2568,6 +2568,13 @@ wasm_runtime_set_instruction_count_limit(WASMExecEnv *exec_env,
 {
     exec_env->instructions_to_execute = instructions_to_execute;
 }
+
+void
+wasm_runtime_set_instruction_count_limit64(WASMExecEnv *exec_env,
+                                           int64 instructions_to_execute)
+{
+    exec_env->instructions_to_execute = instructions_to_execute;
+}
 #endif
 
 bool
