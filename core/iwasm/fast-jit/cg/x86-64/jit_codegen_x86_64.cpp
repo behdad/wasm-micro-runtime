@@ -76,7 +76,10 @@ typedef enum {
     REG_R13_IDX,
     REG_R14_IDX,
     REG_R15_IDX,
-    REG_I64_FREE_IDX = REG_RSI_IDX
+    REG_I64_FREE_IDX = REG_RSI_IDX,
+    /* Holds the instructions that the exec env has left, when the
+       instruction metering is enabled */
+    REG_I64_METER_IDX = REG_R14_IDX
 } RegIndexI64;
 
 /* clang-format off */
@@ -5422,6 +5425,16 @@ fail:
 /**
  * Encode meter insn, METER r0, r1
  *
+ * The jitted code doesn't count in exec_env->instructions_left itself,
+ * where each subtraction would have to wait for the one before it to be
+ * stored. It keeps what is left in a register, which is reserved for
+ * that. The register is only a cache: each change of it is stored into
+ * the exec env at once, so the exec env is up to date whichever way the
+ * jitted code is left. The register is loaded where the count may have
+ * changed without the jitted code: when it is entered from outside, and
+ * after it has called a native function, which may have called wasm
+ * functions.
+ *
  * @param cc the compiler context
  * @param a the assembler to emit the code
  * @param r0 dst jit register that contains the dst operand info
@@ -5434,8 +5447,8 @@ static bool
 lower_meter(JitCompContext *cc, x86::Assembler &a, JitReg r0, JitReg r1)
 {
     const JitHardRegInfo *hreg_info = jit_codegen_get_hreg_info();
-    x86::Mem m(regs_i64[hreg_info->exec_env_hreg_index],
-               (uint32)offsetof(WASMExecEnv, instructions_left), 8);
+    const x86::Mem m(regs_i64[hreg_info->exec_env_hreg_index],
+                     (uint32)offsetof(WASMExecEnv, instructions_left), 8);
     Imm imm;
 
     CHECK_KIND(r0, JIT_REG_KIND_I32);
@@ -5443,9 +5456,11 @@ lower_meter(JitCompContext *cc, x86::Assembler &a, JitReg r0, JitReg r1)
     CHECK_CONST(r1);
 
     /* The flags of the subtraction are those of comparing what was left
-       with r1, which is what the branch insn after this one tests */
+       with r1, which is what the branch insn after this one tests, and
+       the mov doesn't change them */
     imm.setValue(jit_cc_get_const_I32(cc, r1));
-    a.sub(m, imm);
+    a.sub(regs_i64[REG_I64_METER_IDX], imm);
+    a.mov(m, regs_i64[REG_I64_METER_IDX]);
     cc->last_cmp_on_fp = false;
 
     return true;
@@ -6014,6 +6029,16 @@ lower_callnative(JitCompContext *cc, x86::Assembler &a, JitInsn *insn)
     imm.setValue((uint64)func_ptr);
     a.mov(regs_i64[REG_RAX_IDX], imm);
     a.call(regs_i64[REG_RAX_IDX]);
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    {
+        /* The native function may have called wasm functions, which
+           counted: meter_reg = exec_env->instructions_left */
+        const JitHardRegInfo *hreg_info = jit_codegen_get_hreg_info();
+        const x86::Mem m(regs_i64[hreg_info->exec_env_hreg_index],
+                         (uint32)offsetof(WASMExecEnv, instructions_left), 8);
+        a.mov(regs_i64[REG_I64_METER_IDX], m);
+    }
+#endif
 
     if (ret_reg) {
         uint32 ret_reg_no = jit_reg_no(ret_reg);
@@ -9225,6 +9250,14 @@ jit_codegen_init()
 
     /* exec_env_reg = exec_env */
     a.mov(regs_i64[hreg_info->exec_env_hreg_index], x86::rdi);
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* meter_reg = exec_env->instructions_left */
+    {
+        const x86::Mem m(x86::rdi,
+                         (uint32)offsetof(WASMExecEnv, instructions_left), 8);
+        a.mov(regs_i64[REG_I64_METER_IDX], m);
+    }
+#endif
     /* fp_reg = info->frame */
     a.mov(x86::rbp, x86::ptr(x86::rsi, offsetof(JitInterpSwitchInfo, frame)));
     /* rdx = func_idx, is already set in the func_idx argument of
@@ -9434,8 +9467,14 @@ static const uint8 hreg_info_I32[3][7] = {
 static const uint8 hreg_info_I64[3][16] = {
     /* rbp, rax, rbx, rcx, rdx, rdi, rsi, rsp,
        r8,  r9,  r10, r11, r12, r13, r14, r15 */
+#if WASM_ENABLE_INSTRUCTION_METERING == 0
     { 1, 1, 1, 1, 1, 1, 1, 1,
       0, 0, 0, 0, 0, 0, 0, 1 }, /* fixed, rsi is freely used */
+#else
+    { 1, 1, 1, 1, 1, 1, 1, 1,
+      0, 0, 0, 0, 0, 0, 1, 1 }, /* fixed, rsi is freely used,
+                                   r14 is REG_I64_METER_IDX */
+#endif
     { 0, 1, 0, 1, 1, 1, 0, 0,
       1, 1, 1, 1, 0, 0, 0, 0 }, /* caller_saved_native */
     { 0, 1, 1, 1, 1, 1, 0, 0,
