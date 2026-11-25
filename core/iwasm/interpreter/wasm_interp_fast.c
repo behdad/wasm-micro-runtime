@@ -90,16 +90,30 @@ typedef float64 CellType_F64;
     } while (0)
 
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
-#define CHECK_INSTRUCTION_LIMIT()                                 \
-    if (instructions_left == 0) {                                 \
-        wasm_set_exception(module, "instruction limit exceeded"); \
-        goto got_exception;                                       \
-    }                                                             \
-    else if (instructions_left > 0)                               \
-        instructions_left--;
+/* The instructions that the call has left are counted in a local
+   variable and stored into the exec env every time: that is where the
+   calls nested in this one find what is left, and it is up to date when
+   the interpreter is left by a longjmp from the signal handler. When
+   they have run out, a call without a limit starts the count again. */
+#define CHECK_INSTRUCTION_LIMIT()                                         \
+    do {                                                                  \
+        if (instructions_left <= 0) {                                     \
+            instructions_left = exec_env->instructions_refill;            \
+            if (instructions_left <= 0) {                                 \
+                wasm_set_exception(module, "instruction limit exceeded"); \
+                goto got_exception;                                       \
+            }                                                             \
+        }                                                                 \
+        exec_env->instructions_left = --instructions_left;                \
+    } while (0)
+/* After a call out of the interpreter: the calls nested in it have
+   counted in the exec env */
+#define RELOAD_INSTRUCTIONS_LEFT() \
+    instructions_left = exec_env->instructions_left
 
 #else
 #define CHECK_INSTRUCTION_LIMIT() (void)0
+#define RELOAD_INSTRUCTIONS_LEFT() (void)0
 #endif
 
 static inline uint32
@@ -1542,9 +1556,9 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
     uint8 opcode = 0, local_type, *global_addr;
 
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
-    int instructions_left = -1;
+    intptr_t instructions_left = 0;
     if (exec_env) {
-        instructions_left = exec_env->instructions_to_execute;
+        instructions_left = exec_env->instructions_left;
     }
 #endif
 #if !defined(OS_ENABLE_HW_BOUND_CHECK) \
@@ -7691,6 +7705,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 wasm_interp_call_func_native(module, exec_env, cur_func,
                                              prev_frame);
             }
+            RELOAD_INSTRUCTIONS_LEFT();
 
 #if WASM_ENABLE_TAIL_CALL != 0 || WASM_ENABLE_GC != 0
             if (is_return_call) {
