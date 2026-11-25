@@ -2003,8 +2003,14 @@ wasm_runtime_set_native_stack_boundary(wasm_exec_env_t exec_env,
  * It doesn't apply to what the runtime runs with an execution environment
  * of its own, like the start function of a module when it is
  * instantiated: that takes the limit which is set with
- * wasm_runtime_instantiation_args_set_instruction_count_limit(). And it
- * isn't passed on to the threads that a module creates.
+ * wasm_runtime_instantiation_args_set_instruction_count_limit().
+ *
+ * A thread that the module creates gets half of the instructions that
+ * the call which creates it has left, and the call goes on with the other
+ * half: the threads of a module together don't run more instructions
+ * than the limit allows the call. An execution environment that is made
+ * with wasm_runtime_spawn_exec_env() starts with the limit of the one it
+ * is made from.
  *
  * Note: this function is only available when the runtime is built with
  * WAMR_BUILD_INSTRUCTION_METERING=1.

@@ -304,6 +304,42 @@ wasm_exec_env_get_cur_frame(WASMExecEnv *exec_env)
 
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
 /**
+ * Get what the call that is running on the exec env has left of its
+ * instructions.
+ *
+ * @param exec_env the execution environment the call is made with
+ *
+ * @return what the call has left, -1 if it has no limit
+ */
+static inline int64
+wasm_exec_env_get_instructions_left(WASMExecEnv *exec_env)
+{
+    if (exec_env->instructions_reserve == INT64_MAX)
+        return -1;
+    /* The count is below zero after the limit was reached */
+    return (exec_env->instructions_left > 0 ? exec_env->instructions_left : 0)
+           + exec_env->instructions_reserve;
+}
+
+/**
+ * Set what the call that is running on the exec env has left of its
+ * instructions.
+ *
+ * @param exec_env the execution environment the call is made with
+ * @param instructions_left what the call has left, not negative
+ */
+static inline void
+wasm_exec_env_set_instructions_left(WASMExecEnv *exec_env,
+                                    int64 instructions_left)
+{
+    exec_env->instructions_left = instructions_left < INTPTR_MAX
+                                      ? (intptr_t)instructions_left
+                                      : INTPTR_MAX;
+    exec_env->instructions_reserve =
+        instructions_left - exec_env->instructions_left;
+}
+
+/**
  * Start to count the instructions of a call into WASM code. The outermost
  * call that is running on the exec env gets the whole instruction count
  * limit. The calls nested in it, which a native function or the runtime
@@ -326,10 +362,7 @@ wasm_exec_env_start_instruction_count(WASMExecEnv *exec_env,
         int64 limit = exec_env->instructions_to_execute;
 
         if (limit_enforced && limit >= 0) {
-            exec_env->instructions_left =
-                limit < INTPTR_MAX ? (intptr_t)limit : INTPTR_MAX;
-            exec_env->instructions_reserve =
-                limit - exec_env->instructions_left;
+            wasm_exec_env_set_instructions_left(exec_env, limit);
         }
         else {
             exec_env->instructions_left = INTPTR_MAX;
