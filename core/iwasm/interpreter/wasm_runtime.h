@@ -365,6 +365,12 @@ typedef struct WASMModuleInstanceExtra {
 
     RunningMode running_mode;
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* The exec env of the innermost call into the module instance that
+       is running, NULL if there is none */
+    WASMExecEnv *running_exec_env;
+#endif
+
 #if WASM_ENABLE_MULTI_MODULE != 0
     bh_list sub_module_inst_list_head;
     bh_list *sub_module_inst_list;

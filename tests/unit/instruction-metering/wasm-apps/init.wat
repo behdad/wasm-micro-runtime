@@ -9,6 +9,8 @@
 ;;   3 malloc               4 free
 (module
   (import "env" "rounds" (func $rounds (param i32) (result i32)))
+  (import "env" "ask_for_memory"
+    (func $ask_for_memory (param i32) (result i32)))
   (memory 1)
   (global $ran (mut i32) (i32.const 0))
 
@@ -31,6 +33,11 @@
     (call $run (i32.const 3))
     (i32.const 1024))
   (func (export "free") (param i32) (call $run (i32.const 4)))
+
+  ;; have a native function ask the runtime for memory of the module and
+  ;; give it back, which runs the malloc and the free above
+  (func (export "malloc_by_native") (param $size i32) (result i32)
+    (call $ask_for_memory (local.get $size)))
 
   ;; which of them have run to their end
   (func (export "ran") (result i32) (global.get $ran))

@@ -1851,6 +1851,13 @@ execute_malloc_function(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
             exec_env = wasm_clusters_search_exec_env(
                 (WASMModuleInstanceCommon *)module_inst);
 #endif
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+        /* The exec env of the call into the module instance that is
+           running, so that this call counts against the same
+           instruction count limit */
+        if (!exec_env)
+            exec_env = module_inst->e->running_exec_env;
+#endif
         if (!exec_env) {
             if (!(exec_env = exec_env_created = wasm_exec_env_create(
                       (WASMModuleInstanceCommon *)module_inst,
@@ -1940,6 +1947,13 @@ execute_free_function(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
         if (!exec_env)
             exec_env = wasm_clusters_search_exec_env(
                 (WASMModuleInstanceCommon *)module_inst);
+#endif
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+        /* The exec env of the call into the module instance that is
+           running, so that this call counts against the same
+           instruction count limit */
+        if (!exec_env)
+            exec_env = module_inst->e->running_exec_env;
 #endif
         if (!exec_env) {
             if (!(exec_env = exec_env_created = wasm_exec_env_create(
@@ -3703,9 +3717,27 @@ call_wasm_with_hw_bound_check(WASMModuleInstance *module_inst,
     }
     (void)jmpbuf_node_pop;
 }
-#define interp_call_wasm call_wasm_with_hw_bound_check
+#define interp_call_wasm_internal call_wasm_with_hw_bound_check
 #else
-#define interp_call_wasm wasm_interp_call_wasm
+#define interp_call_wasm_internal wasm_interp_call_wasm
+#endif
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+static void
+interp_call_wasm(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
+                 WASMFunctionInstance *function, unsigned argc, uint32 argv[])
+{
+    /* What the runtime runs for the module instance during this call
+       finds the exec env of the call here, and counts against its
+       instruction count limit */
+    WASMExecEnv *exec_env_outer = module_inst->e->running_exec_env;
+
+    module_inst->e->running_exec_env = exec_env;
+    interp_call_wasm_internal(module_inst, exec_env, function, argc, argv);
+    module_inst->e->running_exec_env = exec_env_outer;
+}
+#else
+#define interp_call_wasm interp_call_wasm_internal
 #endif
 
 bool

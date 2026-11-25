@@ -165,6 +165,21 @@ rounds(wasm_exec_env_t exec_env, int32_t which)
     return which >= 0 && which < 5 ? (int32_t)rounds_of[which] : 0;
 }
 
+/* Ask the runtime for memory of the module instance and give it back,
+   during a call: the runtime runs the malloc and the free that the
+   module exports */
+int32_t
+ask_for_memory(wasm_exec_env_t exec_env, int32_t size)
+{
+    wasm_module_inst_t module_inst = wasm_runtime_get_module_inst(exec_env);
+    uint64_t offset =
+        wasm_runtime_module_malloc(module_inst, (uint64_t)size, nullptr);
+
+    if (offset)
+        wasm_runtime_module_free(module_inst, offset);
+    return (int32_t)offset;
+}
+
 NativeSymbol native_symbols[] = {
     { "call_back", (void *)call_back, "(ii)i", nullptr },
     { "call_back_and_swallow", (void *)call_back_and_swallow, "(ii)i",
@@ -174,6 +189,7 @@ NativeSymbol native_symbols[] = {
     { "leave", (void *)leave, "(ii)", nullptr },
     { "look", (void *)look, "()", nullptr },
     { "rounds", (void *)rounds, "(i)i", nullptr },
+    { "ask_for_memory", (void *)ask_for_memory, "(i)i", nullptr },
 };
 
 /* How a call ended */
@@ -944,6 +960,38 @@ TEST_P(InstructionLimitTest, malloc_and_free_of_the_module)
     wasm_runtime_module_free(module_inst, 1024);
     EXPECT_STREQ(wasm_runtime_get_exception(module_inst), limit_exception);
     wasm_runtime_clear_exception(module_inst);
+}
+
+/* When a native function asks for them during a call, they count against
+   the limit of that call */
+TEST_P(InstructionLimitTest, malloc_and_free_of_the_module_in_a_call)
+{
+    uint32_t result = 0;
+
+    LOAD_ENFORCED("init.wasm");
+
+    /* What malloc and free count is counted */
+    int count = cost("malloc_by_native", { 16 });
+    rounds_of[3] = 1010;
+    int count_malloc = cost("malloc_by_native", { 16 });
+    rounds_of[4] = 1010;
+    int count_free = cost("malloc_by_native", { 16 });
+
+    EXPECT_GE(count_malloc - count, 1000);
+    EXPECT_EQ(count_free - count_malloc, count_malloc - count);
+    EXPECT_EQ(call_new("malloc_by_native", { 16 }, count_free, &result),
+              RETURNED);
+    EXPECT_EQ(result, 1024u);
+
+    /* and what they don't get to the end of is stopped */
+    rounds_of[4] = 10;
+    rounds_of[3] = without_end;
+    EXPECT_EQ(call_new("malloc_by_native", { 16 }, 100000, &result),
+              LIMIT_EXCEEDED);
+    rounds_of[3] = 10;
+    rounds_of[4] = without_end;
+    EXPECT_EQ(call_new("malloc_by_native", { 16 }, 100000, &result),
+              LIMIT_EXCEEDED);
 }
 
 /* An exec env starts with the limit that the instance was given */
