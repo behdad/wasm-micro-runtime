@@ -14,6 +14,8 @@ endif()
 set (WAMR_BUILD_INSTRUCTION_METERING 1)
 # bulk.wat has the table instructions
 set (WAMR_BUILD_REF_TYPES 1)
+# control.wat and nested.wat have tail calls
+set (WAMR_BUILD_TAIL_CALL 1)
 
 include (../unit_common.cmake)
 
@@ -35,6 +37,7 @@ if (WAMR_BUILD_AOT EQUAL 1 AND NOT WAMR_BUILD_JIT EQUAL 1)
     TARGET instruction_metering_test_aot
     INPUT ${CMAKE_CURRENT_BINARY_DIR}/control.wasm
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/control.aot
+    FLAGS --enable-tail-call
   )
   gtest_discover_tests (instruction_metering_test_aot)
   return ()

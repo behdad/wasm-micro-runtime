@@ -15,6 +15,8 @@ set (WAMR_BUILD_INSTRUCTION_METERING 1)
 set (WAMR_DISABLE_HW_BOUND_CHECK 1)
 # bulk.wat has the table instructions
 set (WAMR_BUILD_REF_TYPES 1)
+# control.wat and nested.wat have tail calls
+set (WAMR_BUILD_TAIL_CALL 1)
 
 include (../../unit_common.cmake)
 

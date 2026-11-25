@@ -7739,8 +7739,13 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
 #if WASM_ENABLE_TAIL_CALL != 0 || WASM_ENABLE_GC != 0
             if (is_return_call) {
                 /* the frame was freed before tail calling and
-                   the prev_frame was set as exec_env's cur_frame,
-                   so here we recover context from prev_frame */
+                   the prev_frame was set as exec_env's cur_frame */
+                if (!prev_frame->ip) {
+                    /* The function that made the tail call was called
+                       from native. */
+                    return;
+                }
+                /* so here we recover context from prev_frame */
                 RECOVER_CONTEXT(prev_frame);
             }
             else

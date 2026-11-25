@@ -114,6 +114,16 @@
                 (i32.const 5))
     (i32.sub))
 
+  ;; tail calls of an imported function, directly and through the table
+  (func $tail_call_import (export "tail_call_import") (param $x i32)
+    (result i32)
+    (return_call $twice (local.get $x)))
+  (func (export "tail_call_import_through_table") (param $x i32) (result i32)
+    (return_call_indirect (type $unary) (local.get $x) (i32.const 0)))
+  ;; and from a function that is called by a function of the module
+  (func (export "call_tail_call_import") (param $x i32) (result i32)
+    (i32.add (call $tail_call_import (local.get $x)) (i32.const 1)))
+
   ;; have a native function look at what this call has left, and count
   ;; to n
   (func (export "look_and_count") (param $n i32) (result i32)

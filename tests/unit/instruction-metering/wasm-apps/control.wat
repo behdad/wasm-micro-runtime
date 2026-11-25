@@ -248,6 +248,17 @@
   (func (export "trap") (param i32) (result i32)
     (i32.add (i32.div_u (i32.const 100) (local.get 0)) (i32.const 1)))
 
+  ;; tail calls: of a function, of itself, and through the table
+  (func (export "tail_call") (param i32) (result i32)
+    (return_call $add1 (local.get 0)))
+  (func $tail_recursion (export "tail_recursion") (param $n i32) (result i32)
+    (if (result i32) (local.get $n)
+      (then
+        (return_call $tail_recursion (i32.sub (local.get $n) (i32.const 1))))
+      (else (i32.const 7))))
+  (func (export "tail_call_indirect") (param i32) (result i32)
+    (return_call_indirect (type $unary) (local.get 0) (i32.const 0)))
+
   ;; A call sets the local variables of the function to zero and counts
   ;; one more instruction for every 64 bytes of them: none for the 56
   ;; bytes of the first function, five for the 320 bytes of the second

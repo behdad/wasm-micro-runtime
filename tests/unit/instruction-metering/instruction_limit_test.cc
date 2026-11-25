@@ -609,6 +609,12 @@ const ControlCase control_cases[] = {
     { "memory", 1, 1, 34 },
     { "memory", 10, 2, 151 },
     { "trap", 5, 21, 6 },
+    /* local.get, return_call; local.get, i32.const, i32.add, end */
+    { "tail_call", 5, 6, 6 },
+    { "tail_recursion", 0, 7, 5 },
+    { "tail_recursion", 10, 7, 65 },
+    { "tail_call_indirect", 4, 5, 7 },
+    { "tail_call_indirect", 5, 6, 7 },
     /* local.get, end */
     { "few_locals", 5, 5, 2 },
     /* and five for its local variables */
@@ -713,6 +719,9 @@ TEST_F(InstructionLimitTestBase, fast_jit_counts_like_the_interpreter)
         "loop_call",
         "multi_value",
         "memory",
+        "tail_call",
+        "tail_recursion",
+        "tail_call_indirect",
         "few_locals",
         "many_locals",
         "loop_call_few_locals",
@@ -1171,6 +1180,36 @@ TEST_P(InstructionLimitTest, import_called_through_the_table)
         EXPECT_EQ(call_new("import_through_table", { 10 }, count, &result),
                   RETURNED);
         EXPECT_EQ(result, 5u);
+    }
+}
+
+/* A tail call of an imported function, also from a function that the
+   host has called: the interpreters went on at address zero then */
+TEST_P(InstructionLimitTest, tail_call_of_an_import)
+{
+    uint32_t result = 0;
+
+    LOAD("nested.wasm");
+
+    for (const char *name :
+         { "tail_call_import", "tail_call_import_through_table" }) {
+        SCOPED_TRACE(name);
+        EXPECT_EQ(call(name, { 21 }, -1, &result), RETURNED);
+        EXPECT_EQ(result, 42u);
+    }
+    EXPECT_EQ(call("call_tail_call_import", { 21 }, -1, &result), RETURNED);
+    EXPECT_EQ(result, 43u);
+
+    if (enforced()) {
+        int count = cost("tail_call_import", { 21 });
+
+#if WASM_ENABLE_FAST_INTERP == 0
+        /* local.get, return_call */
+        EXPECT_EQ(count, 2);
+#endif
+        EXPECT_EQ(call_new("tail_call_import", { 21 }, count, &result),
+                  RETURNED);
+        EXPECT_EQ(result, 42u);
     }
 }
 
