@@ -180,6 +180,23 @@ ask_for_memory(wasm_exec_env_t exec_env, int32_t size)
     return (int32_t)offset;
 }
 
+int32_t
+twice(wasm_exec_env_t exec_env, int32_t x)
+{
+    (void)exec_env;
+    return 2 * x;
+}
+
+/* A native function with five parameters isn't called directly by the
+   code of the Fast JIT */
+int32_t
+add5(wasm_exec_env_t exec_env, int32_t a, int32_t b, int32_t c, int32_t d,
+     int32_t e)
+{
+    (void)exec_env;
+    return a + b + c + d + e;
+}
+
 NativeSymbol native_symbols[] = {
     { "call_back", (void *)call_back, "(ii)i", nullptr },
     { "call_back_and_swallow", (void *)call_back_and_swallow, "(ii)i",
@@ -188,6 +205,8 @@ NativeSymbol native_symbols[] = {
     { "run_down", (void *)run_down, "(i)", nullptr },
     { "leave", (void *)leave, "(ii)", nullptr },
     { "look", (void *)look, "()", nullptr },
+    { "twice", (void *)twice, "(i)i", nullptr },
+    { "add5", (void *)add5, "(iiiii)i", nullptr },
     { "rounds", (void *)rounds, "(i)i", nullptr },
     { "ask_for_memory", (void *)ask_for_memory, "(i)i", nullptr },
 };
@@ -1125,6 +1144,35 @@ TEST_P(InstructionLimitTest, exec_env_starts_with_the_limit_of_the_instance)
 /*
  * Calls nested through native functions
  */
+
+/* An imported function that is called through the table leaves its
+   result where the next call doesn't overwrite it. This is in every
+   running mode: the code of the Fast JIT got it wrong, which also made
+   it count something else than the interpreter. */
+TEST_P(InstructionLimitTest, import_called_through_the_table)
+{
+    uint32_t result = 0;
+
+    LOAD("nested.wasm");
+
+    for (uint32_t x : { 0u, 10u, 1000u }) {
+        SCOPED_TRACE(x);
+        EXPECT_EQ(call("import_through_table", { x }, -1, &result), RETURNED);
+        EXPECT_EQ(result, 2 * x - 15);
+    }
+    if (enforced()) {
+        int count = cost("import_through_table", { 10 });
+
+#if WASM_ENABLE_FAST_INTERP == 0
+        /* local.get, i32.const, call_indirect, five i32.const, call,
+           i32.sub, end */
+        EXPECT_EQ(count, 11);
+#endif
+        EXPECT_EQ(call_new("import_through_table", { 10 }, count, &result),
+                  RETURNED);
+        EXPECT_EQ(result, 5u);
+    }
+}
 
 /* A call that a native function makes into the module counts against the
    limit of the call that the native function is in */

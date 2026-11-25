@@ -16,6 +16,12 @@
   (import "env" "run_down" (func $run_down (param i32)))
   (import "env" "leave" (func $leave (param i32 i32)))
   (import "env" "look" (func $look))
+  (import "env" "twice" (func $twice (param i32) (result i32)))
+  (import "env" "add5"
+    (func $add5 (param i32 i32 i32 i32 i32) (result i32)))
+  (type $unary (func (param i32) (result i32)))
+  (table 1 funcref)
+  (elem (i32.const 0) $twice)
   (memory 1)
   ;; how often a call_back_and_swallow has returned
   (global $returned (mut i32) (i32.const 0))
@@ -99,6 +105,14 @@
     (param $n i32) (result i32)
     (call $leave (local.get $left) (local.get $reserve))
     (call $count (local.get $n)))
+
+  ;; call an imported function through the table, and one with five
+  ;; parameters while the result of the first is on the stack: 2 x - 15
+  (func (export "import_through_table") (param $x i32) (result i32)
+    (call_indirect (type $unary) (local.get $x) (i32.const 0))
+    (call $add5 (i32.const 1) (i32.const 2) (i32.const 3) (i32.const 4)
+                (i32.const 5))
+    (i32.sub))
 
   ;; have a native function look at what this call has left, and count
   ;; to n
