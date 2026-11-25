@@ -88,6 +88,13 @@ typedef struct WASMExecEnv {
     } wasm_stack;
 
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* What the outermost call into wasm code that is running on this
+       exec env has left of its instructions, as far as a machine word
+       holds it. The calls nested in it share the count. A call without
+       a limit counts down as well, from INTPTR_MAX.
+       Note: the code of LLVM JIT and AOT counts here as well, don't
+       change the place of the field */
+    intptr_t instructions_left;
     /* instructions to execute */
     int64 instructions_to_execute;
     /* What the outermost call into wasm code that is running on this
@@ -96,11 +103,9 @@ typedef struct WASMExecEnv {
        word of 32 bits can't hold all of a limit. INT64_MAX if the call
        has no limit, which is never used up. */
     int64 instructions_reserve;
-    /* What the outermost call into wasm code that is running on this
-       exec env has left of its instructions, as far as a machine word
-       holds it. The calls nested in it share the count. A call without
-       a limit counts down as well, from INTPTR_MAX. */
-    intptr_t instructions_left;
+    /* Whether a call into wasm code is running on this exec env. The
+       calls nested in it don't start to count again. */
+    bool instruction_count_started;
 #endif
 
 #if WASM_ENABLE_FAST_JIT != 0
@@ -388,29 +393,46 @@ wasm_exec_env_count_bytes(WASMExecEnv *exec_env, uint64 bytes)
  * makes on the same exec env, go on with what it has left.
  *
  * @param exec_env the execution environment the call is made with
- * @param limit_enforced whether the limit is enforced in the running mode
- *        of the module instance that is called, see
+ * @param limit_enforced whether the limit is enforced for the module
+ *        instance that is called, see
  *        wasm_runtime_is_instruction_count_limit_enforced(). If it isn't,
- *        the call has no limit: what does count the instructions in such
- *        a mode, like the code of Fast JIT before a function tiers up to
- *        LLVM JIT, mustn't end the call
+ *        the call has no limit: what does count the instructions all the
+ *        same mustn't end the call
+ *
+ * @return true if the call is the outermost one, which has to call
+ *         wasm_exec_env_end_instruction_count() when it is over, false
+ *         if it is nested in another
  */
-static inline void
+static inline bool
 wasm_exec_env_start_instruction_count(WASMExecEnv *exec_env,
                                       bool limit_enforced)
 {
-    /* Only the outermost call finds no frame in the exec env */
-    if (!exec_env->cur_frame) {
-        int64 limit = exec_env->instructions_to_execute;
+    int64 limit = exec_env->instructions_to_execute;
 
-        if (limit_enforced && limit >= 0) {
-            wasm_exec_env_set_instructions_left(exec_env, limit);
-        }
-        else {
-            exec_env->instructions_left = INTPTR_MAX;
-            exec_env->instructions_reserve = INT64_MAX;
-        }
+    if (exec_env->instruction_count_started)
+        return false;
+
+    exec_env->instruction_count_started = true;
+    if (limit_enforced && limit >= 0) {
+        wasm_exec_env_set_instructions_left(exec_env, limit);
     }
+    else {
+        exec_env->instructions_left = INTPTR_MAX;
+        exec_env->instructions_reserve = INT64_MAX;
+    }
+    return true;
+}
+
+/**
+ * End the count of the instructions of the outermost call into WASM code
+ * that was running on the exec env: the next call starts to count again.
+ *
+ * @param exec_env the execution environment the call was made with
+ */
+static inline void
+wasm_exec_env_end_instruction_count(WASMExecEnv *exec_env)
+{
+    exec_env->instruction_count_started = false;
 }
 
 /**

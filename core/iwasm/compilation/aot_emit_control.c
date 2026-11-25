@@ -6,6 +6,7 @@
 #include "aot_emit_control.h"
 #include "aot_compiler.h"
 #include "aot_emit_exception.h"
+#include "aot_emit_metering.h"
 #include "aot_stack_frame_comp.h"
 #if WASM_ENABLE_GC != 0
 #include "aot_emit_gc.h"
@@ -312,6 +313,11 @@ handle_next_reachable_block(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
 
     aot_checked_addr_list_destroy(func_ctx);
     bh_assert(block);
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* What is translated next is reached some other way */
+    aot_metering_end_run(func_ctx);
+#endif
 
 #if WASM_ENABLE_DEBUG_AOT != 0
     return_location = dwarf_gen_location(
@@ -662,6 +668,13 @@ aot_compile_op_block(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     }
 
     if (label_type == LABEL_TYPE_BLOCK || label_type == LABEL_TYPE_LOOP) {
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+        /* The branches to a loop pay for its first opcode, and so does
+           the loop when it is entered */
+        if (label_type == LABEL_TYPE_LOOP
+            && !aot_metering_count_next(comp_ctx, func_ctx))
+            goto fail;
+#endif
         /* Create block */
         format_block_name(name, sizeof(name), block->block_index, label_type,
                           LABEL_BEGIN);
@@ -694,6 +707,9 @@ aot_compile_op_block(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         }
 
         if (!LLVMIsEfficientConstInt(value)) {
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+            aot_metering_end_run(func_ctx);
+#endif
             /* Compare value is not constant, create condition br IR */
             /* Create entry block */
             format_block_name(name, sizeof(name), block->block_index,
@@ -823,6 +839,12 @@ aot_compile_op_else(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         aot_set_last_error("Invalid WASM block type.");
         return false;
     }
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* The else pays for the `end` it jumps to */
+    if (!aot_metering_count_target(comp_ctx, func_ctx))
+        return false;
+#endif
 
     /* Create end block if needed */
     if (!block->llvm_end_block) {
@@ -1019,6 +1041,12 @@ aot_compile_op_br(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         return false;
     }
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* The branch pays for the opcode it branches to */
+    if (!aot_metering_count_target(comp_ctx, func_ctx))
+        return false;
+#endif
+
     if (comp_ctx->aot_frame) {
         if (comp_ctx->enable_gc && !aot_gen_commit_values(comp_ctx->aot_frame))
             return false;
@@ -1150,6 +1178,13 @@ aot_compile_conditional_br(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
 
     if (!LLVMIsEfficientConstInt(value_cmp)) {
         /* Compare value is not constant, create condition br IR */
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+        /* The br_if pays for the opcode which is executed after it,
+           whether it branches or not */
+        if (!aot_metering_count_next(comp_ctx, func_ctx))
+            goto fail;
+#endif
 
         /* Create llvm else block */
         CREATE_BLOCK(llvm_else_block, "br_if_else");
@@ -1324,6 +1359,12 @@ aot_compile_op_br_table(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     }
 
     if (!LLVMIsEfficientConstInt(value_cmp)) {
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+        /* The br_table pays for the opcode it branches to */
+        if (!aot_metering_count_target(comp_ctx, func_ctx))
+            return false;
+#endif
+
         if (comp_ctx->aot_frame) {
             if (comp_ctx->enable_gc
                 && !aot_gen_commit_values(comp_ctx->aot_frame))
@@ -1614,6 +1655,13 @@ compile_gc_cond_br(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     if (!(block_dst = get_target_block(func_ctx, br_depth))) {
         return false;
     }
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* The branch pays for the opcode which is executed after it,
+       whether it branches or not */
+    if (!aot_metering_count_next(comp_ctx, func_ctx))
+        goto fail;
+#endif
 
     /* Create llvm else block */
     CREATE_BLOCK(llvm_else_block, "br_if_else");

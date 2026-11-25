@@ -42,6 +42,13 @@ bh_static_assert(offsetof(WASMExecEnv, wasm_stack.top)
                  == 11 * sizeof(uintptr_t));
 bh_static_assert(offsetof(WASMExecEnv, wasm_stack.bottom)
                  == 12 * sizeof(uintptr_t));
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+/* See aot_emit_metering.c */
+bh_static_assert(offsetof(WASMExecEnv, instructions_left)
+                 == 13 * sizeof(uintptr_t));
+bh_static_assert(sizeof(((WASMExecEnv *)0)->instructions_left)
+                 == sizeof(uintptr_t));
+#endif
 
 bh_static_assert(offsetof(AOTModuleInstance, memories) == 1 * sizeof(uint64));
 bh_static_assert(offsetof(AOTModuleInstance, func_ptrs) == 5 * sizeof(uint64));
@@ -1967,8 +1974,8 @@ aot_instantiate(AOTModule *module, AOTModuleInstance *parent,
     wasm_runtime_set_custom_data_internal(
         (WASMModuleInstanceCommon *)module_inst, args->custom_data);
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
-    /* AOT code ignores the limit, this is for the exec envs to start
-       with the limit they were asked to start with all the same */
+    /* The instance of a thread starts its exec envs with the limit of
+       the instance that it was made from */
     extra->common.instruction_count_limit =
         parent ? ((AOTModuleInstanceExtra *)parent->e)
                      ->common.instruction_count_limit
@@ -2566,10 +2573,11 @@ invoke_native_with_hw_bound_check(WASMExecEnv *exec_env, void *func_ptr,
     (void)jmpbuf_node_pop;
     return ret;
 }
-#define invoke_native_internal invoke_native_with_hw_bound_check /* NOLINT */
+/* NOLINTNEXTLINE */
+#define invoke_native_no_count invoke_native_with_hw_bound_check
 #else /* else of OS_ENABLE_HW_BOUND_CHECK */
 static inline bool
-invoke_native_internal(WASMExecEnv *exec_env, void *func_ptr,
+invoke_native_no_count(WASMExecEnv *exec_env, void *func_ptr,
                        const WASMFuncType *func_type, const char *signature,
                        void *attachment, uint32 *argv, uint32 argc,
                        uint32 *argv_ret)
@@ -2589,6 +2597,38 @@ invoke_native_internal(WASMExecEnv *exec_env, void *func_ptr,
                                       attachment, argv, argc, argv_ret);
 }
 #endif /* end of OS_ENABLE_HW_BOUND_CHECK */
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+static bool
+invoke_native_internal(WASMExecEnv *exec_env, void *func_ptr,
+                       const WASMFuncType *func_type, const char *signature,
+                       void *attachment, uint32 *argv, uint32 argc,
+                       uint32 *argv_ret)
+{
+    AOTModuleInstance *module_inst = (AOTModuleInstance *)exec_env->module_inst;
+    AOTModuleInstanceExtra *extra = (AOTModuleInstanceExtra *)module_inst->e;
+    /* What the runtime runs for the module instance during this call
+       finds the exec env of the call here, and counts against its
+       instruction count limit */
+    WASMExecEnv *exec_env_outer = extra->running_exec_env;
+    /* The outermost call on the exec env gets the whole limit, the calls
+       nested in it go on with what it has left */
+    bool is_outermost = wasm_exec_env_start_instruction_count(
+        exec_env, wasm_runtime_is_instruction_count_limit_enforced(
+                      (WASMModuleInstanceCommon *)module_inst));
+    bool ret;
+
+    extra->running_exec_env = exec_env;
+    ret = invoke_native_no_count(exec_env, func_ptr, func_type, signature,
+                                 attachment, argv, argc, argv_ret);
+    extra->running_exec_env = exec_env_outer;
+    if (is_outermost)
+        wasm_exec_env_end_instruction_count(exec_env);
+    return ret;
+}
+#else
+#define invoke_native_internal invoke_native_no_count /* NOLINT */
+#endif
 
 #ifdef AOT_STACK_FRAME_DEBUG
 typedef void (*stack_frame_callback_t)(struct WASMExecEnv *exec_env);
@@ -2925,6 +2965,14 @@ execute_malloc_function(AOTModuleInstance *module_inst, WASMExecEnv *exec_env,
             exec_env = wasm_clusters_search_exec_env(
                 (WASMModuleInstanceCommon *)module_inst);
 #endif
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+        /* The exec env of the call into the module instance that is
+           running, so that this call counts against the same
+           instruction count limit */
+        if (!exec_env)
+            exec_env =
+                ((AOTModuleInstanceExtra *)module_inst->e)->running_exec_env;
+#endif
         if (!exec_env) {
             if (!(exec_env = exec_env_created = wasm_exec_env_create(
                       (WASMModuleInstanceCommon *)module_inst,
@@ -3014,6 +3062,14 @@ execute_free_function(AOTModuleInstance *module_inst, WASMExecEnv *exec_env,
         if (!exec_env)
             exec_env = wasm_clusters_search_exec_env(
                 (WASMModuleInstanceCommon *)module_inst);
+#endif
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+        /* The exec env of the call into the module instance that is
+           running, so that this call counts against the same
+           instruction count limit */
+        if (!exec_env)
+            exec_env =
+                ((AOTModuleInstanceExtra *)module_inst->e)->running_exec_env;
 #endif
         if (!exec_env) {
             if (!(exec_env = exec_env_created = wasm_exec_env_create(

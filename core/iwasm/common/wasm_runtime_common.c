@@ -2607,25 +2607,71 @@ wasm_runtime_get_instruction_count_limit(WASMModuleInstanceCommon *module_inst)
 #endif
     return common ? common->instruction_count_limit : -1;
 }
+
+#if WASM_ENABLE_AOT != 0
+void
+wasm_runtime_instruction_limit_exceeded(WASMExecEnv *exec_env)
+{
+    /* The call has nothing left, whatever the code has taken off the
+       count */
+    exec_env->instructions_left = 0;
+    wasm_set_exception_with_id((WASMModuleInstance *)exec_env->module_inst,
+                               EXCE_INSTRUCTION_LIMIT_EXCEEDED);
+#ifdef OS_ENABLE_HW_BOUND_CHECK
+    wasm_runtime_access_exce_check_guard_page();
 #endif
+}
+
+intptr_t
+wasm_runtime_refill_instruction_count(WASMExecEnv *exec_env)
+{
+    /* The count is below zero by what the code has taken off it and
+       wasn't there */
+    intptr_t left = exec_env->instructions_left;
+    intptr_t count = wasm_exec_env_refill_instruction_count(exec_env);
+
+    bh_assert(left < 0);
+
+    if (count + left < 0)
+        return -1;
+
+    exec_env->instructions_left = count + left;
+    return count + left;
+}
+#endif
+#endif /* end of WASM_ENABLE_INSTRUCTION_METERING != 0 */
 
 bool
 wasm_runtime_is_instruction_count_limit_enforced(
     WASMModuleInstanceCommon *module_inst)
 {
-#if WASM_ENABLE_INSTRUCTION_METERING != 0 && WASM_ENABLE_INTERP != 0
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+#if WASM_ENABLE_INTERP != 0
     if (module_inst->module_type == Wasm_Module_Bytecode) {
         RunningMode running_mode = wasm_runtime_get_running_mode(module_inst);
 
-        /* The interpreters and the code of Fast JIT count the
-           instructions. The code of LLVM JIT doesn't, and in Multi-tier
-           JIT mode the functions are handed over to it one by one. */
-        return running_mode == Mode_Interp || running_mode == Mode_Fast_JIT;
+        /* The interpreters, the code of Fast JIT and the code of LLVM
+           JIT count the instructions. In Multi-tier JIT mode the
+           functions are handed over from the one to the other while
+           they run, and the limit is ignored. */
+        return running_mode == Mode_Interp || running_mode == Mode_Fast_JIT
+               || running_mode == Mode_LLVM_JIT;
     }
-#else
-    (void)module_inst;
 #endif
-    /* AOT code ignores the limit */
+#if WASM_ENABLE_AOT != 0
+    if (module_inst->module_type == Wasm_Module_AoT) {
+        AOTModule *module =
+            (AOTModule *)((AOTModuleInstance *)module_inst)->module;
+
+        /* The code of an AOT file counts the instructions if it was
+           compiled to do so */
+        return (module->feature_flags & WASM_FEATURE_INSTRUCTION_METERING)
+                   ? true
+                   : false;
+    }
+#endif
+#endif
+    (void)module_inst;
     return false;
 }
 

@@ -5961,6 +5961,9 @@ init_llvm_jit_functions_stage1(WASMModule *module, char *error_buf,
 #if WASM_ENABLE_CALL_INDIRECT_OVERLONG != 0
     option.enable_call_indirect_overlong = true;
 #endif
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    option.enable_instruction_metering = true;
+#endif
     option.enable_aux_stack_check = true;
 #if WASM_ENABLE_PERF_PROFILING != 0 || WASM_ENABLE_DUMP_CALL_STACK != 0 \
     || WASM_ENABLE_AOT_STACK_FRAME != 0

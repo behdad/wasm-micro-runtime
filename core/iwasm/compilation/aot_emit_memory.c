@@ -6,6 +6,7 @@
 #include "aot_emit_memory.h"
 #include "aot_compiler.h"
 #include "aot_emit_exception.h"
+#include "aot_emit_metering.h"
 #include "../aot/aot_runtime.h"
 #include "aot_intrinsic.h"
 #include "aot_emit_control.h"
@@ -1733,6 +1734,12 @@ aot_compile_op_memory_init(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     POP_I32(offset);
     POP_MEM_OFFSET(dst);
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    if (!aot_metering_count_units(comp_ctx, func_ctx, len,
+                                  WASM_METERING_BYTES_PER_INSTRUCTION))
+        return false;
+#endif
+
     if (!zero_extend_u64(comp_ctx, &dst, "dst64")) {
         return false;
     }
@@ -1834,6 +1841,12 @@ aot_compile_op_memory_copy(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx)
     POP_MEM_OFFSET(src);
     POP_MEM_OFFSET(dst);
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    if (!aot_metering_count_units(comp_ctx, func_ctx, len,
+                                  WASM_METERING_BYTES_PER_INSTRUCTION))
+        return false;
+#endif
+
     if (!(src_addr = check_bulk_memory_overflow(comp_ctx, func_ctx, src, len)))
         return false;
 
@@ -1922,6 +1935,12 @@ aot_compile_op_memory_fill(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx)
     POP_MEM_OFFSET(len);
     POP_I32(val);
     POP_MEM_OFFSET(dst);
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    if (!aot_metering_count_units(comp_ctx, func_ctx, len,
+                                  WASM_METERING_BYTES_PER_INSTRUCTION))
+        return false;
+#endif
 
     if (!(dst_addr = check_bulk_memory_overflow(comp_ctx, func_ctx, dst, len)))
         return false;

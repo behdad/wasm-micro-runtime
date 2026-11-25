@@ -514,6 +514,14 @@ check_feature_flags(char *error_buf, uint32 error_buf_size,
     }
 #endif
 
+#if WASM_ENABLE_INSTRUCTION_METERING == 0
+    if (feature_flags & WASM_FEATURE_INSTRUCTION_METERING) {
+        set_error_buf(error_buf, error_buf_size,
+                      "instruction metering is not enabled in this build");
+        return false;
+    }
+#endif
+
     return true;
 }
 
@@ -605,7 +613,7 @@ load_target_info_section(const uint8 *buf, const uint8 *buf_end,
         return false;
     }
 
-#if WASM_ENABLE_DUMP_CALL_STACK != 0
+#if WASM_ENABLE_DUMP_CALL_STACK != 0 || WASM_ENABLE_INSTRUCTION_METERING != 0
     module->feature_flags = target_info.feature_flags;
 #endif
 

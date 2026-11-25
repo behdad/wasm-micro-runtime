@@ -4513,6 +4513,10 @@ aot_obj_data_create(AOTCompContext *comp_ctx)
     if (!comp_ctx->call_stack_features.func_idx) {
         obj_data->target_info.feature_flags |= WASM_FEATURE_FRAME_NO_FUNC_IDX;
     }
+    if (comp_ctx->enable_instruction_metering) {
+        obj_data->target_info.feature_flags |=
+            WASM_FEATURE_INSTRUCTION_METERING;
+    }
 
     bh_print_time("Begin to resolve object file info");
 
