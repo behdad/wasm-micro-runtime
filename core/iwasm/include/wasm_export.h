@@ -1990,17 +1990,16 @@ wasm_runtime_set_instruction_count_limit(wasm_exec_env_t exec_env,
 /**
  * Check whether the instruction count limit, see
  * wasm_runtime_set_instruction_count_limit(), is enforced for the calls
- * into a WASM module instance in the running mode it has now.
+ * that the host makes into a WASM module instance in the running mode
+ * it has now.
  *
  * It is enforced when the runtime was built with
  * WAMR_BUILD_INSTRUCTION_METERING=1 and the module instance is of a wasm
- * bytecode module and is in
- * - interpreter mode (Mode_Interp), or
- * - Fast JIT mode (Mode_Fast_JIT), unless the runtime was built with the
- *   LLVM JIT and lazy JIT compilation as well, where a function may be
- *   handed over to the code of the LLVM JIT.
+ * bytecode module and is in interpreter mode (Mode_Interp) or in Fast
+ * JIT mode (Mode_Fast_JIT).
  * The limit is ignored for an AOT module and in the LLVM JIT and
- * Multi-tier JIT modes.
+ * Multi-tier JIT modes: a call that the host makes into such a module
+ * instance has no limit.
  *
  * Check again after changing the running mode of the module instance.
  *

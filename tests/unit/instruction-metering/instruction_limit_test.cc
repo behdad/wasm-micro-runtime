@@ -56,19 +56,11 @@ running_mode_name(const testing::TestParamInfo<RunningMode> &info)
 }
 
 /* Whether the limit is expected to be enforced in a running mode: in the
-   interpreter, and in the Fast JIT of a runtime that can't tier up to the
-   LLVM JIT. */
+   interpreter and in the Fast JIT */
 bool
 expect_enforced(RunningMode running_mode)
 {
-    if (running_mode == Mode_Interp)
-        return true;
-#if WASM_ENABLE_FAST_JIT != 0 \
-    && !(WASM_ENABLE_JIT != 0 && WASM_ENABLE_LAZY_JIT != 0)
-    if (running_mode == Mode_Fast_JIT)
-        return true;
-#endif
-    return false;
+    return running_mode == Mode_Interp || running_mode == Mode_Fast_JIT;
 }
 
 /*
@@ -359,6 +351,23 @@ TEST_F(InstructionLimitTestBase, ignored_by_the_llvm_jit)
 
 #if WASM_ENABLE_JIT != 0 && WASM_ENABLE_FAST_JIT != 0 \
     && WASM_ENABLE_LAZY_JIT != 0
+/* In Multi-tier JIT mode a function runs the code of Fast JIT, which
+   counts, until its code of LLVM JIT is ready, which doesn't. The limit
+   is ignored all the time, not from some call on. */
+TEST_F(InstructionLimitTestBase, ignored_in_multi_tier_jit_mode)
+{
+    uint32_t result = 0;
+
+    running_mode = Mode_Multi_Tier_JIT;
+    LOAD("control.wasm");
+    EXPECT_FALSE(enforced());
+    for (int i = 0; i < 20; i++) {
+        SCOPED_TRACE(i);
+        EXPECT_EQ(call("loop_br", { 100000 }, 10, &result), RETURNED);
+        EXPECT_EQ(result, 100000u);
+    }
+}
+
 /* A module instance in Fast JIT mode runs the code of Fast JIT, which
    counts, also when the function has tiered up to LLVM JIT for the
    instances in Multi-tier JIT mode, and also when it is called through
@@ -385,6 +394,7 @@ TEST_F(InstructionLimitTestBase, fast_jit_mode_stays_out_of_llvm_jit_code)
     }
 
     ASSERT_TRUE(wasm_runtime_set_running_mode(module_inst, Mode_Fast_JIT));
+    EXPECT_TRUE(enforced());
     EXPECT_EQ(call("loop_br", { 100000 }, 10, &result), LIMIT_EXCEEDED);
 
     /* A call that found the function not compiled yet goes through the
@@ -550,8 +560,7 @@ TEST_P(InstructionLimitTest, trap)
 #endif
 }
 
-#if WASM_ENABLE_FAST_JIT != 0 \
-    && !(WASM_ENABLE_JIT != 0 && WASM_ENABLE_LAZY_JIT != 0)
+#if WASM_ENABLE_FAST_JIT != 0
 /* The Fast JIT counts what the classic interpreter counts, for every
    function of control.wat that returns */
 TEST_F(InstructionLimitTestBase, fast_jit_counts_like_the_interpreter)

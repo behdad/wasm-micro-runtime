@@ -309,13 +309,20 @@ wasm_exec_env_get_cur_frame(WASMExecEnv *exec_env)
  * makes on the same exec env, go on with what it has left.
  *
  * @param exec_env the execution environment the call is made with
+ * @param limit_enforced whether the limit is enforced in the running mode
+ *        of the module instance that is called, see
+ *        wasm_runtime_is_instruction_count_limit_enforced(). If it isn't,
+ *        the call has no limit: what does count the instructions in such
+ *        a mode, like the code of Fast JIT before a function tiers up to
+ *        LLVM JIT, mustn't end the call
  */
 static inline void
-wasm_exec_env_start_instruction_count(WASMExecEnv *exec_env)
+wasm_exec_env_start_instruction_count(WASMExecEnv *exec_env,
+                                      bool limit_enforced)
 {
     /* Only the outermost call finds no frame in the exec env */
     if (!exec_env->cur_frame) {
-        if (exec_env->instructions_to_execute >= 0) {
+        if (limit_enforced && exec_env->instructions_to_execute >= 0) {
             exec_env->instructions_left = exec_env->instructions_to_execute;
             exec_env->instructions_refill = 0;
         }
