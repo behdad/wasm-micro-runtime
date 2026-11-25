@@ -590,6 +590,10 @@ const ControlCase control_cases[] = {
     { "memory", 1, 1, 34 },
     { "memory", 10, 2, 151 },
     { "trap", 5, 21, 6 },
+    /* local.get, end */
+    { "few_locals", 5, 5, 2 },
+    /* and five for its local variables */
+    { "many_locals", 5, 5, 7 },
 };
 /* clang-format on */
 
@@ -690,6 +694,10 @@ TEST_F(InstructionLimitTestBase, fast_jit_counts_like_the_interpreter)
         "loop_call",
         "multi_value",
         "memory",
+        "few_locals",
+        "many_locals",
+        "loop_call_few_locals",
+        "loop_call_many_locals",
     };
 
     LOAD("control.wasm");
@@ -715,6 +723,22 @@ TEST_F(InstructionLimitTestBase, fast_jit_counts_like_the_interpreter)
     }
 }
 #endif
+
+/* A call counts one more for every 64 bytes of the local variables of
+   the function, which it sets to zero */
+TEST_P(InstructionLimitTest, calls_count_the_local_variables)
+{
+    LOAD_ENFORCED("control.wasm");
+
+    /* 320 bytes of local variables against 56 */
+    EXPECT_EQ(cost("many_locals", { 5 }) - cost("few_locals", { 5 }), 5);
+    for (uint32_t n : { 1u, 10u, 100u }) {
+        SCOPED_TRACE(n);
+        EXPECT_EQ(cost("loop_call_many_locals", { n })
+                      - cost("loop_call_few_locals", { n }),
+                  5 * (int)n);
+    }
+}
 
 /* An instruction that handles a block of memory counts one more for every
    64 bytes of it, and one that handles table elements one more for every

@@ -247,4 +247,31 @@
   ;; a trap in the middle of straight-line code
   (func (export "trap") (param i32) (result i32)
     (i32.add (i32.div_u (i32.const 100) (local.get 0)) (i32.const 1)))
+
+  ;; A call sets the local variables of the function to zero and counts
+  ;; one more instruction for every 64 bytes of them: none for the 56
+  ;; bytes of the first function, five for the 320 bytes of the second
+  (func $few_locals (export "few_locals") (param i32) (result i32)
+    (local i64 i64 i64 i64 i64 i64 i64)
+    (local.get 0))
+  (func $many_locals (export "many_locals") (param i32) (result i32)
+    (local i64 i64 i64 i64 i64 i64 i64 i64 i64 i64)
+    (local i64 i64 i64 i64 i64 i64 i64 i64 i64 i64)
+    (local i64 i64 i64 i64 i64 i64 i64 i64 i64 i64)
+    (local i64 i64 i64 i64 i64 i64 i64 i64 i64 i64)
+    (local.get 0))
+  (func (export "loop_call_few_locals") (param $n i32) (result i32)
+    (local $i i32)
+    (loop $again
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (drop (call $few_locals (local.get $i)))
+      (br_if $again (i32.lt_u (local.get $i) (local.get $n))))
+    (local.get $i))
+  (func (export "loop_call_many_locals") (param $n i32) (result i32)
+    (local $i i32)
+    (loop $again
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (drop (call $many_locals (local.get $i)))
+      (br_if $again (i32.lt_u (local.get $i) (local.get $n))))
+    (local.get $i))
 )

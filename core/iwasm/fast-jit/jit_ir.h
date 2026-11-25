@@ -1035,6 +1035,8 @@ typedef struct JitCompContext {
     JitBasicBlock *metering_basic_block;
     /* Whether the opcode before the next one has paid for it */
     bool metering_prepaid;
+    /* Whether the local variables of the function have been paid for */
+    bool metering_frame_counted;
 #endif
 
     /* Registers of frame pointer, exec_env and CMP result. */

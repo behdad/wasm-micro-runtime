@@ -1996,11 +1996,12 @@ wasm_runtime_set_native_stack_boundary(wasm_exec_env_t exec_env,
  * - The fast interpreter counts the operations which the loader turns
  *   the opcodes into, and there are fewer of them.
  * An instruction counts as one, and so does a call of a native function
- * whatever the function does. The instructions that handle a block of
- * memory or of a table count more, in every running mode: memory.fill,
- * memory.copy and memory.init count one more for every 64 bytes, and
- * table.fill, table.copy and table.init one more for every 8 table
- * elements.
+ * whatever the function does. What handles a block of memory counts
+ * more, in every running mode: memory.fill, memory.copy and memory.init
+ * count one more for every 64 bytes, table.fill, table.copy and
+ * table.init one more for every 8 table elements, and a call of a
+ * function of the module one more for every 64 bytes of the local
+ * variables of that function, which it sets to zero.
  *
  * The limit is ignored for AOT modules and in the LLVM JIT and Multi-tier
  * JIT running modes, see wasm_runtime_is_instruction_count_limit_enforced().

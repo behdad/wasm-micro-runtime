@@ -6842,6 +6842,16 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                in loader), all_cell_num must be smaller than 1MB */
             bh_assert(all_cell_num < 1 * BH_MB);
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+            /* The local variables of the function, which are going to
+               be set to zero. If the call has too few instructions left
+               for them, it ends in the frame of the caller, like when
+               there is no room for the frame: a tail call has freed
+               its own. */
+            frame = prev_frame;
+            COUNT_INSTRUCTIONS_OF_BYTES((uint64)cur_func->local_cell_num * 4);
+#endif
+
             frame_size = wasm_interp_interp_frame_size(all_cell_num);
             if (!(frame = ALLOC_FRAME(exec_env, frame_size, prev_frame))) {
                 frame = prev_frame;

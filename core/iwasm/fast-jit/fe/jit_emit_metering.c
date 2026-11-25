@@ -59,6 +59,16 @@ jit_metering_count_opcode(JitCompContext *cc, uint8 opcode)
     if (cc->metering_insn && cc->metering_count + count > (uint32)INT32_MAX)
         jit_metering_end_run(cc);
 
+    if (!cc->metering_frame_counted) {
+        /* The first run of a function also pays for the local variables
+           that the code at the entry of the function has set to zero,
+           like a call does in the interpreter: one instruction for every
+           WASM_METERING_BYTES_PER_INSTRUCTION bytes of them */
+        count += cc->cur_wasm_func->local_cell_num * 4
+                 / WASM_METERING_BYTES_PER_INSTRUCTION;
+        cc->metering_frame_counted = true;
+    }
+
     if (!cc->metering_insn) {
         /* Begin a run: the count is filled in when the run ends */
         cc->metering_insn = GEN_INSN(METER, cc->cmp_reg, NEW_CONST(I32, 0));
