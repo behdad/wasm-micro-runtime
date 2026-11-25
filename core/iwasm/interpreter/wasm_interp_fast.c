@@ -90,21 +90,28 @@ typedef float64 CellType_F64;
     } while (0)
 
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
+#if WASM_ENABLE_LABELS_AS_VALUES != 0 && defined(__clang__)
+/* An empty asm statement, which generates no code and which clang
+   doesn't move code across. It keeps the store before it in the handler
+   it was written in. Without it clang moves the stores of all the
+   handlers into one block, in front of the indirect jump that they
+   share until it is copied into each of them, and generates slower
+   code. */
+#define KEEP_IN_HANDLER() __asm__ volatile("")
+#else
+#define KEEP_IN_HANDLER() (void)0
+#endif
+
 /* The instructions that the call has left are counted in a local
    variable and stored into the exec env every time: that is where the
    calls nested in this one find what is left, and it is up to date when
-   the interpreter is left by a longjmp from the signal handler. When
-   they have run out, a call without a limit starts the count again. */
-#define CHECK_INSTRUCTION_LIMIT()                                         \
-    do {                                                                  \
-        if (instructions_left <= 0) {                                     \
-            instructions_left = exec_env->instructions_refill;            \
-            if (instructions_left <= 0) {                                 \
-                wasm_set_exception(module, "instruction limit exceeded"); \
-                goto got_exception;                                       \
-            }                                                             \
-        }                                                                 \
-        exec_env->instructions_left = --instructions_left;                \
+   the interpreter is left by a longjmp from the signal handler. */
+#define CHECK_INSTRUCTION_LIMIT()                        \
+    do {                                                 \
+        if (--instructions_left < 0)                     \
+            goto instructions_ran_out;                   \
+        exec_env->instructions_left = instructions_left; \
+        KEEP_IN_HANDLER();                               \
     } while (0)
 /* After a call out of the interpreter: the calls nested in it have
    counted in the exec env */
@@ -1448,34 +1455,35 @@ wasm_interp_dump_op_count()
 #define HANDLE_OP(opcode) HANDLE_##opcode:
 #endif
 #if WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS != 0
-#define FETCH_OPCODE_AND_DISPATCH()                    \
-    do {                                               \
-        const void *p_label_addr = *(void **)frame_ip; \
-        frame_ip += sizeof(void *);                    \
-        CHECK_INSTRUCTION_LIMIT();                     \
-        goto *p_label_addr;                            \
+#define FETCH_OPCODE_AND_DISPATCH()        \
+    do {                                   \
+        const void *p_label_addr;          \
+        CHECK_INSTRUCTION_LIMIT();         \
+        p_label_addr = *(void **)frame_ip; \
+        frame_ip += sizeof(void *);        \
+        goto *p_label_addr;                \
     } while (0)
 #else
 #if UINTPTR_MAX == UINT64_MAX
 #define FETCH_OPCODE_AND_DISPATCH()                                       \
     do {                                                                  \
         const void *p_label_addr;                                         \
+        CHECK_INSTRUCTION_LIMIT();                                        \
         bh_assert(((uintptr_t)frame_ip & 1) == 0);                        \
         /* int32 relative offset was emitted in 64-bit target */          \
         p_label_addr = label_base + (int32)LOAD_U32_WITH_2U16S(frame_ip); \
         frame_ip += sizeof(int32);                                        \
-        CHECK_INSTRUCTION_LIMIT();                                        \
         goto *p_label_addr;                                               \
     } while (0)
 #else
 #define FETCH_OPCODE_AND_DISPATCH()                                      \
     do {                                                                 \
         const void *p_label_addr;                                        \
+        CHECK_INSTRUCTION_LIMIT();                                       \
         bh_assert(((uintptr_t)frame_ip & 1) == 0);                       \
         /* uint32 label address was emitted in 32-bit target */          \
         p_label_addr = (void *)(uintptr_t)LOAD_U32_WITH_2U16S(frame_ip); \
         frame_ip += sizeof(int32);                                       \
-        CHECK_INSTRUCTION_LIMIT();                                       \
         goto *p_label_addr;                                              \
     } while (0)
 #endif
@@ -7829,6 +7837,18 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
     }
 
         (void)frame_ip_end;
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    instructions_ran_out:
+        /* A call without a limit starts the count again */
+        instructions_left = exec_env->instructions_refill;
+        if (instructions_left <= 0) {
+            wasm_set_exception(module, "instruction limit exceeded");
+            goto got_exception;
+        }
+        /* Count the instruction again, now that there are some left */
+        HANDLE_OP_END();
+#endif
 
 #if WASM_ENABLE_SHARED_MEMORY != 0
     unaligned_atomic:

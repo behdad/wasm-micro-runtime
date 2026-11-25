@@ -1547,21 +1547,28 @@ get_global_addr(uint8 *global_data, WASMGlobalInstance *global)
 }
 
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
+#if WASM_ENABLE_LABELS_AS_VALUES != 0 && defined(__clang__)
+/* An empty asm statement, which generates no code and which clang
+   doesn't move code across. It keeps the store before it in the handler
+   it was written in. Without it clang moves the stores of all the
+   handlers into one block, in front of the indirect jump that they
+   share until it is copied into each of them, and generates slower
+   code. */
+#define KEEP_IN_HANDLER() __asm__ volatile("")
+#else
+#define KEEP_IN_HANDLER() (void)0
+#endif
+
 /* The instructions that the call has left are counted in a local
    variable and stored into the exec env every time: that is where the
    calls nested in this one find what is left, and it is up to date when
-   the interpreter is left by a longjmp from the signal handler. When
-   they have run out, a call without a limit starts the count again. */
-#define CHECK_INSTRUCTION_LIMIT()                                         \
-    do {                                                                  \
-        if (instructions_left <= 0) {                                     \
-            instructions_left = exec_env->instructions_refill;            \
-            if (instructions_left <= 0) {                                 \
-                wasm_set_exception(module, "instruction limit exceeded"); \
-                goto got_exception;                                       \
-            }                                                             \
-        }                                                                 \
-        exec_env->instructions_left = --instructions_left;                \
+   the interpreter is left by a longjmp from the signal handler. */
+#define CHECK_INSTRUCTION_LIMIT()                        \
+    do {                                                 \
+        if (--instructions_left < 0)                     \
+            goto instructions_ran_out;                   \
+        exec_env->instructions_left = instructions_left; \
+        KEEP_IN_HANDLER();                               \
     } while (0)
 /* After a call out of the interpreter: the calls nested in it have
    counted in the exec env */
@@ -6894,6 +6901,22 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
 #endif
         HANDLE_OP_END();
     }
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    instructions_ran_out:
+        /* A call without a limit starts the count again */
+        instructions_left = exec_env->instructions_refill;
+        if (instructions_left <= 0) {
+            wasm_set_exception(module, "instruction limit exceeded");
+            goto got_exception;
+        }
+        exec_env->instructions_left = --instructions_left;
+#if WASM_ENABLE_LABELS_AS_VALUES != 0
+        FETCH_OPCODE_AND_DISPATCH();
+#else
+        continue;
+#endif
+#endif
 
 #if WASM_ENABLE_SHARED_MEMORY != 0
     unaligned_atomic:
