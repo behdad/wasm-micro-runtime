@@ -895,6 +895,11 @@ wasm_runtime_set_instruction_count_limit(WASMExecEnv *exec_env,
                                          int instructions_to_execute);
 #endif
 
+/* See wasm_export.h for description */
+WASM_RUNTIME_API_EXTERN bool
+wasm_runtime_is_instruction_count_limit_enforced(
+    WASMModuleInstanceCommon *module_inst);
+
 #if WASM_CONFIGURABLE_BOUNDS_CHECKS != 0
 /* See wasm_export.h for description */
 WASM_RUNTIME_API_EXTERN

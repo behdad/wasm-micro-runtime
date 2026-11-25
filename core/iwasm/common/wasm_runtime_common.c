@@ -2570,6 +2570,35 @@ wasm_runtime_set_instruction_count_limit(WASMExecEnv *exec_env,
 }
 #endif
 
+bool
+wasm_runtime_is_instruction_count_limit_enforced(
+    WASMModuleInstanceCommon *module_inst)
+{
+#if WASM_ENABLE_INSTRUCTION_METERING != 0 && WASM_ENABLE_INTERP != 0
+    if (module_inst->module_type == Wasm_Module_Bytecode) {
+        RunningMode running_mode = wasm_runtime_get_running_mode(module_inst);
+
+        if (running_mode == Mode_Interp)
+            return true;
+#if WASM_ENABLE_FAST_JIT != 0 \
+    && !(WASM_ENABLE_JIT != 0 && WASM_ENABLE_LAZY_JIT != 0)
+        /* The code of the Fast JIT counts the instructions too. That
+           can't be relied on in a runtime which can tier up: the stub
+           that compiles a function when it is first called goes on
+           through the function table of the module, where the function
+           may have been replaced with the code of the LLVM JIT, which
+           doesn't count. */
+        if (running_mode == Mode_Fast_JIT)
+            return true;
+#endif
+    }
+#else
+    (void)module_inst;
+#endif
+    /* AOT code and the code of the LLVM JIT ignore the limit */
+    return false;
+}
+
 WASMFuncType *
 wasm_runtime_get_function_type(const WASMFunctionInstanceCommon *function,
                                uint32 module_type)
