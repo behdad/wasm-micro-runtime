@@ -90,6 +90,16 @@ typedef struct WASMExecEnv {
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
     /* instructions to execute */
     int instructions_to_execute;
+    /* What instructions_left starts again from when it has run out:
+       zero, which ends the call, if the call has a limit, and
+       INT32_MAX if it has none */
+    int32 instructions_refill;
+    /* What the outermost call into wasm code that is running on this
+       exec env has left of its instructions. The calls nested in it
+       share the count. A call without a limit counts down as well,
+       from INTPTR_MAX, which it gets to the end of where a machine
+       word has 32 bits. */
+    intptr_t instructions_left;
 #endif
 
 #if WASM_ENABLE_FAST_JIT != 0
@@ -290,6 +300,32 @@ wasm_exec_env_get_cur_frame(WASMExecEnv *exec_env)
 {
     return exec_env->cur_frame;
 }
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+/**
+ * Start to count the instructions of a call into WASM code. The outermost
+ * call that is running on the exec env gets the whole instruction count
+ * limit. The calls nested in it, which a native function or the runtime
+ * makes on the same exec env, go on with what it has left.
+ *
+ * @param exec_env the execution environment the call is made with
+ */
+static inline void
+wasm_exec_env_start_instruction_count(WASMExecEnv *exec_env)
+{
+    /* Only the outermost call finds no frame in the exec env */
+    if (!exec_env->cur_frame) {
+        if (exec_env->instructions_to_execute >= 0) {
+            exec_env->instructions_left = exec_env->instructions_to_execute;
+            exec_env->instructions_refill = 0;
+        }
+        else {
+            exec_env->instructions_left = INTPTR_MAX;
+            exec_env->instructions_refill = INT32_MAX;
+        }
+    }
+}
+#endif
 
 struct WASMModuleInstanceCommon *
 wasm_exec_env_get_module_inst(WASMExecEnv *exec_env);

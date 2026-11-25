@@ -7423,6 +7423,10 @@ wasm_interp_call_wasm(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
     }
     argc = function->param_cell_num;
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    wasm_exec_env_start_instruction_count(exec_env);
+#endif
+
 #if defined(OS_ENABLE_HW_BOUND_CHECK) && WASM_DISABLE_STACK_HW_BOUND_CHECK == 0
     /*
      * wasm_runtime_detect_native_stack_overflow is done by
