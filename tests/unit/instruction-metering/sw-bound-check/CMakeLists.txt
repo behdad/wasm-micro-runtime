@@ -13,6 +13,8 @@ endif()
 
 set (WAMR_BUILD_INSTRUCTION_METERING 1)
 set (WAMR_DISABLE_HW_BOUND_CHECK 1)
+# bulk.wat has the table instructions
+set (WAMR_BUILD_REF_TYPES 1)
 
 include (../../unit_common.cmake)
 
@@ -22,7 +24,7 @@ add_executable (instruction_metering_test_sw_bound_check
 )
 target_link_libraries (instruction_metering_test_sw_bound_check gtest_main)
 
-foreach (fixture control forever nested init)
+foreach (fixture control forever nested init bulk)
   wamr_unit_test_compile_wat_to_wasm (
     TARGET instruction_metering_test_sw_bound_check
     SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/../wasm-apps/${fixture}.wat

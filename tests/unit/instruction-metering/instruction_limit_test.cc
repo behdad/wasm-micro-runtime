@@ -716,6 +716,88 @@ TEST_F(InstructionLimitTestBase, fast_jit_counts_like_the_interpreter)
 }
 #endif
 
+/* An instruction that handles a block of memory counts one more for every
+   64 bytes of it, and one that handles table elements one more for every
+   8 of them */
+TEST_P(InstructionLimitTest, bulk_instructions_count_what_they_handle)
+{
+    static const struct {
+        const char *name;
+        /* what is handled for one more instruction */
+        uint32_t unit;
+        /* what there is to handle */
+        uint32_t size;
+    } functions[] = {
+        { "memory_fill", 64, 262144 }, { "memory_copy", 64, 131072 },
+        { "memory_init", 64, 256 },    { "table_fill", 8, 2040 },
+        { "table_copy", 8, 1024 },     { "table_init", 8, 64 },
+    };
+
+    LOAD_ENFORCED("bulk.wasm");
+
+    for (const auto &f : functions) {
+        int count = cost(f.name, { 0 });
+
+        for (uint32_t n : { f.unit - 1, f.unit, f.unit + 1, f.size }) {
+            SCOPED_TRACE(std::string(f.name) + " " + std::to_string(n));
+            EXPECT_EQ(cost(f.name, { n }), count + (int)(n / f.unit));
+        }
+    }
+}
+
+#if WASM_ENABLE_FAST_JIT != 0
+TEST_F(InstructionLimitTestBase, fast_jit_counts_bulk_like_the_interpreter)
+{
+    static const char *const functions[] = {
+        "memory_fill", "memory_copy", "memory_init",
+        "table_fill",  "table_copy",  "table_init",
+    };
+
+    LOAD("bulk.wasm");
+
+    for (const char *name : functions) {
+        /* table.init has 64 elements to take */
+        for (uint32_t n : { 0u, 1u, 8u, 63u, 64u }) {
+            SCOPED_TRACE(std::string(name) + " " + std::to_string(n));
+            uint32_t result_interp = 0, result_jit = 1;
+
+            running_mode = Mode_Interp;
+            int count_interp = cost(name, { n });
+            EXPECT_EQ(call_new(name, { n }, count_interp, &result_interp),
+                      RETURNED);
+
+            running_mode = Mode_Fast_JIT;
+            int count_jit = cost(name, { n });
+            EXPECT_EQ(call_new(name, { n }, count_jit, &result_jit), RETURNED);
+
+            EXPECT_EQ(count_jit, count_interp);
+            EXPECT_EQ(result_jit, result_interp);
+        }
+    }
+}
+#endif
+
+/* So a loop of such instructions is stopped after as many bytes as the
+   limit allows, not after as many times around */
+TEST_P(InstructionLimitTest, bulk_instructions_without_end)
+{
+    LOAD_ENFORCED("bulk.wasm");
+
+    /* The first fill of the whole memory takes 4096 instructions */
+    EXPECT_EQ(call_new("memory_fill_without_end", {}, 4000, nullptr),
+              LIMIT_EXCEEDED);
+    EXPECT_EQ(call_new("memory_fill_without_end", {}, 1000000, nullptr),
+              LIMIT_EXCEEDED);
+    /* and the limit is told from a trap: there are only 256 bytes of
+       data */
+    EXPECT_EQ(call_new("memory_init", { 257 }, 1000000, nullptr), TRAPPED);
+    EXPECT_EQ(exception, "Exception: out of bounds memory access");
+    /* A call without a limit isn't stopped */
+    uint32_t result = 0;
+    EXPECT_EQ(call_new("memory_fill", { 262144 }, -1, &result), RETURNED);
+    EXPECT_EQ(result, 7u);
+}
+
 /*
  * What the limit stops
  */

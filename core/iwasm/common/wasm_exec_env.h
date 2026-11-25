@@ -339,6 +339,48 @@ wasm_exec_env_set_instructions_left(WASMExecEnv *exec_env,
         instructions_left - exec_env->instructions_left;
 }
 
+/* An instruction that handles a block of memory, like memory.fill, counts
+   one more instruction for every so many bytes of it, and an instruction
+   that handles table elements takes each of them for so many bytes */
+#define WASM_METERING_BYTES_PER_INSTRUCTION 64
+#define WASM_METERING_BYTES_PER_TABLE_ELEM 8
+
+/**
+ * Count what an instruction of the call that is running on the exec env
+ * counts for a block of memory that it handles, beyond the one which
+ * every instruction counts.
+ *
+ * @param exec_env the execution environment the call is made with
+ * @param bytes the size of the block
+ *
+ * @return true if the call had so many instructions left, false if it
+ *         hadn't, and then it has none left
+ */
+static inline bool
+wasm_exec_env_count_bytes(WASMExecEnv *exec_env, uint64 bytes)
+{
+    int64 left = wasm_exec_env_get_instructions_left(exec_env);
+    uint64 count = bytes / WASM_METERING_BYTES_PER_INSTRUCTION;
+
+    if (left < 0) {
+        /* A call without a limit counts down as well, and never has
+           too few instructions left */
+        exec_env->instructions_left =
+            exec_env->instructions_left > 0
+                    && (uint64)exec_env->instructions_left > count
+                ? exec_env->instructions_left - (intptr_t)count
+                : 0;
+        return true;
+    }
+
+    if ((uint64)left < count) {
+        wasm_exec_env_set_instructions_left(exec_env, 0);
+        return false;
+    }
+    wasm_exec_env_set_instructions_left(exec_env, left - (int64)count);
+    return true;
+}
+
 /**
  * Start to count the instructions of a call into WASM code. The outermost
  * call that is running on the exec env gets the whole instruction count

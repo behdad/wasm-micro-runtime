@@ -6,6 +6,7 @@
 #include "jit_emit_table.h"
 #include "jit_emit_exception.h"
 #include "jit_emit_function.h"
+#include "jit_emit_metering.h"
 #include "../../interpreter/wasm_runtime.h"
 #include "../jit_frontend.h"
 
@@ -99,6 +100,12 @@ wasm_init_table(WASMModuleInstance *inst, uint32 tbl_idx, uint32 seg_idx,
     uint32 tbl_sz, tbl_seg_len = 0, i;
     table_elem_type_t *addr;
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    if (!jit_metering_count_bytes(
+            inst, (uint64)len * WASM_METERING_BYTES_PER_TABLE_ELEM))
+        return -1;
+#endif
+
     if (!bh_bitmap_get_bit(inst->e->common.elem_dropped, seg_idx)) {
         /* table segment isn't dropped */
         tbl_seg_init_values = tbl_seg->init_values;
@@ -171,6 +178,12 @@ wasm_copy_table(WASMModuleInstance *inst, uint32 src_tbl_idx,
 {
     WASMTableInstance *src_tbl, *dst_tbl;
     uint32 src_tbl_sz, dst_tbl_sz;
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    if (!jit_metering_count_bytes(
+            inst, (uint64)len * WASM_METERING_BYTES_PER_TABLE_ELEM))
+        return -1;
+#endif
 
     dst_tbl = inst->tables[dst_tbl_idx];
     dst_tbl_sz = dst_tbl->cur_size;
@@ -284,6 +297,12 @@ wasm_fill_table(WASMModuleInstance *inst, uint32 tbl_idx, uint32 dst_offset,
 {
     WASMTableInstance *tbl;
     uint32 tbl_sz;
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    if (!jit_metering_count_bytes(
+            inst, (uint64)len * WASM_METERING_BYTES_PER_TABLE_ELEM))
+        return -1;
+#endif
 
     tbl = inst->tables[tbl_idx];
     tbl_sz = tbl->cur_size;

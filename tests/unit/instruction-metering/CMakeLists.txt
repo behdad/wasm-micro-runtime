@@ -12,6 +12,8 @@ if(NOT WAMR_UNIT_TEST_SUITE_ENABLED)
 endif()
 
 set (WAMR_BUILD_INSTRUCTION_METERING 1)
+# bulk.wat has the table instructions
+set (WAMR_BUILD_REF_TYPES 1)
 
 include (../unit_common.cmake)
 
@@ -53,7 +55,7 @@ foreach (labels_as_values 1 0)
     WASM_ENABLE_LABELS_AS_VALUES=${labels_as_values})
   target_link_libraries (${test_target} ${LLVM_AVAILABLE_LIBS} gtest_main)
 
-  foreach (fixture control forever nested init)
+  foreach (fixture control forever nested init bulk)
     wamr_unit_test_compile_wat_to_wasm (
       TARGET ${test_target}
       SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/wasm-apps/${fixture}.wat

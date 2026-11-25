@@ -7,6 +7,7 @@
 #define _JIT_EMIT_METERING_H_
 
 #include "../jit_compiler.h"
+#include "../../interpreter/wasm_runtime.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -61,6 +62,21 @@ jit_metering_end_opcode(JitCompContext *cc);
  */
 void
 jit_metering_end_run(JitCompContext *cc);
+
+/**
+ * Count what an instruction counts for a block of memory that it is going
+ * to handle, beyond the one which every instruction counts. It is for the
+ * native functions that the jitted code calls to do the work of such an
+ * instruction, and throws the exception "instruction limit exceeded" if
+ * the call that the jitted code runs for has fewer instructions left.
+ *
+ * @param module_inst the module instance that the jitted code runs for
+ * @param bytes the size of the block
+ *
+ * @return true if success, false if the exception was thrown
+ */
+bool
+jit_metering_count_bytes(WASMModuleInstance *module_inst, uint64 bytes);
 
 #endif /* end of WASM_ENABLE_INSTRUCTION_METERING != 0 */
 

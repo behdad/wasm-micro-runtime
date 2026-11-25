@@ -1574,9 +1574,21 @@ get_global_addr(uint8 *global_data, WASMGlobalInstance *global)
    counted in the exec env */
 #define RELOAD_INSTRUCTIONS_LEFT() \
     instructions_left = exec_env->instructions_left
+/* Count what an instruction counts for a block of memory that it is
+   going to handle, see wasm_exec_env_count_bytes() */
+#define COUNT_INSTRUCTIONS_OF_BYTES(bytes)                            \
+    do {                                                              \
+        bool counted = wasm_exec_env_count_bytes(exec_env, bytes);    \
+        RELOAD_INSTRUCTIONS_LEFT();                                   \
+        if (!counted) {                                               \
+            wasm_set_exception(module, "instruction limit exceeded"); \
+            goto got_exception;                                       \
+        }                                                             \
+    } while (0)
 #else
 #define CHECK_INSTRUCTION_LIMIT() (void)0
 #define RELOAD_INSTRUCTIONS_LEFT() (void)0
+#define COUNT_INSTRUCTIONS_OF_BYTES(bytes) (void)0
 #endif
 
 static void
@@ -5754,6 +5766,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         bytes = (uint64)(uint32)POP_I32();
                         offset = (uint64)(uint32)POP_I32();
                         addr = (mem_offset_t)POP_MEM_OFFSET();
+                        COUNT_INSTRUCTIONS_OF_BYTES(bytes);
 
 #if WASM_ENABLE_THREAD_MGR != 0
                         linear_mem_size = get_linear_mem_size();
@@ -5813,6 +5826,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         len = POP_MEM_OFFSET();
                         src = POP_MEM_OFFSET();
                         dst = POP_MEM_OFFSET();
+                        COUNT_INSTRUCTIONS_OF_BYTES(len);
 
 #if WASM_ENABLE_MULTI_MEMORY != 0
                         /* dst memidx */
@@ -5901,6 +5915,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         len = POP_MEM_OFFSET();
                         fill_val = POP_I32();
                         dst = POP_MEM_OFFSET();
+                        COUNT_INSTRUCTIONS_OF_BYTES(len);
 
 #if WASM_ENABLE_THREAD_MGR != 0
                         linear_mem_size = get_linear_mem_size();
@@ -5952,6 +5967,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         n = (uint32)POP_I32();
                         s = (uint32)POP_I32();
                         d = (tbl_elem_idx_t)POP_TBL_ELEM_IDX();
+                        COUNT_INSTRUCTIONS_OF_BYTES(
+                            (uint64)n * WASM_METERING_BYTES_PER_TABLE_ELEM);
 
                         if (!bh_bitmap_get_bit(module->e->common.elem_dropped,
                                                elem_idx)) {
@@ -6054,6 +6071,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         is_table64 = dst_tbl_inst->is_table64;
 #endif
                         d = (tbl_elem_idx_t)POP_TBL_ELEM_IDX();
+                        COUNT_INSTRUCTIONS_OF_BYTES(
+                            (uint64)n * WASM_METERING_BYTES_PER_TABLE_ELEM);
 
                         if (
 #if WASM_ENABLE_MEMORY64 != 0
@@ -6158,6 +6177,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         fill_val = POP_REF();
 #endif
                         elem_idx = POP_TBL_ELEM_IDX();
+                        COUNT_INSTRUCTIONS_OF_BYTES(
+                            (uint64)n * WASM_METERING_BYTES_PER_TABLE_ELEM);
 
                         if (
 #if WASM_ENABLE_MEMORY64 != 0

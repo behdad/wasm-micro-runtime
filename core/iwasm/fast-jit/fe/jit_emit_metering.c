@@ -106,4 +106,18 @@ jit_metering_end_run(JitCompContext *cc)
     }
 }
 
+bool
+jit_metering_count_bytes(WASMModuleInstance *module_inst, uint64 bytes)
+{
+    /* The exec env of the call into the module instance that is running:
+       the jitted code loads its count again after a native function has
+       returned */
+    bh_assert(module_inst->e->running_exec_env);
+    if (wasm_exec_env_count_bytes(module_inst->e->running_exec_env, bytes))
+        return true;
+
+    wasm_set_exception_with_id(module_inst, EXCE_INSTRUCTION_LIMIT_EXCEEDED);
+    return false;
+}
+
 #endif /* end of WASM_ENABLE_INSTRUCTION_METERING != 0 */
