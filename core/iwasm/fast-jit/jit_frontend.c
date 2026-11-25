@@ -12,6 +12,7 @@
 #include "fe/jit_emit_exception.h"
 #include "fe/jit_emit_function.h"
 #include "fe/jit_emit_memory.h"
+#include "fe/jit_emit_metering.h"
 #include "fe/jit_emit_numberic.h"
 #include "fe/jit_emit_parametric.h"
 #include "fe/jit_emit_table.h"
@@ -1454,6 +1455,11 @@ jit_compile_func(JitCompContext *cc)
         cc->jit_frame->ip = frame_ip;
         opcode = *frame_ip++;
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+        if (!jit_metering_count_opcode(cc, opcode))
+            return false;
+#endif
+
 #if 0 /* TODO */
 #if WASM_ENABLE_THREAD_MGR != 0
     /* Insert suspend check point */
@@ -2581,6 +2587,11 @@ jit_compile_func(JitCompContext *cc)
                 jit_set_last_error(cc, "unsupported opcode");
                 return false;
         }
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+        jit_metering_end_opcode(cc);
+#endif
+
         /* Error may occur when creating registers, basic blocks, insns,
            consts and labels, in which the return value may be unchecked,
            here we check again */
@@ -2588,6 +2599,10 @@ jit_compile_func(JitCompContext *cc)
             return false;
         }
     }
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    jit_metering_end_run(cc);
+#endif
 
     (void)func_idx;
     return true;

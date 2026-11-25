@@ -3358,6 +3358,9 @@ static const char *exception_msgs[] = {
     "create stringview failed",       /* EXCE_FAILED_TO_CREATE_STRINGVIEW */
     "encode failed",                  /* EXCE_FAILED_TO_ENCODE_STRING */
     "",                               /* EXCE_ALREADY_THROWN */
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    "instruction limit exceeded",     /* EXCE_INSTRUCTION_LIMIT_EXCEEDED */
+#endif
 };
 /* clang-format on */
 

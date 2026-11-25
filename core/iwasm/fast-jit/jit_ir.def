@@ -244,6 +244,14 @@ INSN(AT_XCHGI64, Reg, 4, 1)
 INSN(FENCE, Reg, 0, 0)
 #endif
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+/* Instruction metering:
+ * op1(cmp result) op2(number of instructions, a constant)
+ * Take op2 off the instructions that the exec env has left, and set op1
+ * like `CMP op1, <the instructions it had left>, op2` does */
+INSN(METER, Reg, 2, 1)
+#endif
+
 #undef INSN
 
 /**

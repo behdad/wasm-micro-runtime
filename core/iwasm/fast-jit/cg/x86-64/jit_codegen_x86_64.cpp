@@ -5418,6 +5418,42 @@ fail:
     return false;
 }
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+/**
+ * Encode meter insn, METER r0, r1
+ *
+ * @param cc the compiler context
+ * @param a the assembler to emit the code
+ * @param r0 dst jit register that contains the dst operand info
+ * @param r1 src jit register that contains the number of instructions
+ *        to take off the instructions that the exec env has left
+ *
+ * @return true if success, false if failed
+ */
+static bool
+lower_meter(JitCompContext *cc, x86::Assembler &a, JitReg r0, JitReg r1)
+{
+    const JitHardRegInfo *hreg_info = jit_codegen_get_hreg_info();
+    x86::Mem m(regs_i64[hreg_info->exec_env_hreg_index],
+               (uint32)offsetof(WASMExecEnv, instructions_left), 8);
+    Imm imm;
+
+    CHECK_KIND(r0, JIT_REG_KIND_I32);
+    CHECK_KIND(r1, JIT_REG_KIND_I32);
+    CHECK_CONST(r1);
+
+    /* The flags of the subtraction are those of comparing what was left
+       with r1, which is what the branch insn after this one tests */
+    imm.setValue(jit_cc_get_const_I32(cc, r1));
+    a.sub(m, imm);
+    cc->last_cmp_on_fp = false;
+
+    return true;
+fail:
+    return false;
+}
+#endif /* end of WASM_ENABLE_INSTRUCTION_METERING != 0 */
+
 /**
  * Encode detecting the cmp flags in reg, and jmp to the relative address
  * according to the condition opcode
@@ -7837,6 +7873,14 @@ jit_codegen_gen_native(JitCompContext *cc)
                     if (!lower_cmp(cc, a, r0, r1, r2))
                         GOTO_FAIL;
                     break;
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+                case JIT_OP_METER:
+                    LOAD_2ARGS();
+                    if (!lower_meter(cc, a, r0, r1))
+                        GOTO_FAIL;
+                    break;
+#endif
 
                 case JIT_OP_SELECTEQ:
                 case JIT_OP_SELECTNE:

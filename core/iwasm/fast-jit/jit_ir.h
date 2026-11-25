@@ -1024,6 +1024,19 @@ typedef struct JitCompContext {
     /* The current basic block to generate instructions */
     JitBasicBlock *cur_basic_block;
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* The METER insn of the run of opcodes which the jitted code pays
+       for at once, NULL if there is no run now, and the instructions
+       counted in the run so far */
+    JitInsn *metering_insn;
+    uint32 metering_count;
+    /* The opcode being translated and the basic block it began in */
+    uint8 metering_opcode;
+    JitBasicBlock *metering_basic_block;
+    /* Whether the opcode before the next one has paid for it */
+    bool metering_prepaid;
+#endif
+
     /* Registers of frame pointer, exec_env and CMP result. */
     JitReg fp_reg;
     JitReg exec_env_reg;
