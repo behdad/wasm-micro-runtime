@@ -151,6 +151,20 @@ look(wasm_exec_env_t exec_env)
         (int64_t)exec_env->instructions_left + exec_env->instructions_reserve;
 }
 
+/* How often the functions of wasm-apps/init.wat go around their loops:
+   the start function, __post_instantiate, __wasm_call_ctors, malloc and
+   free */
+uint32_t rounds_of[5];
+/* Too often to wait for */
+const uint32_t without_end = UINT32_MAX;
+
+int32_t
+rounds(wasm_exec_env_t exec_env, int32_t which)
+{
+    (void)exec_env;
+    return which >= 0 && which < 5 ? (int32_t)rounds_of[which] : 0;
+}
+
 NativeSymbol native_symbols[] = {
     { "call_back", (void *)call_back, "(ii)i", nullptr },
     { "call_back_and_swallow", (void *)call_back_and_swallow, "(ii)i",
@@ -159,6 +173,7 @@ NativeSymbol native_symbols[] = {
     { "run_down", (void *)run_down, "(i)", nullptr },
     { "leave", (void *)leave, "(ii)", nullptr },
     { "look", (void *)look, "()", nullptr },
+    { "rounds", (void *)rounds, "(i)i", nullptr },
 };
 
 /* How a call ended */
@@ -176,6 +191,8 @@ class InstructionLimitTestBase : public testing::Test
             "env", native_symbols,
             sizeof(native_symbols) / sizeof(native_symbols[0])));
         swallowed_exception.clear();
+        for (uint32_t &r : rounds_of)
+            r = 10;
     }
 
     void TearDown() override
@@ -224,6 +241,32 @@ class InstructionLimitTestBase : public testing::Test
         }
         exec_env = wasm_runtime_create_exec_env(module_inst, stack_size);
         ASSERT_NE(exec_env, nullptr);
+    }
+
+    /* Make a new instance whose exec envs start with an instruction
+       count limit. It is in the running mode of the test from the
+       beginning, where the runtime runs functions of the module. */
+    bool instantiate_with_limit(int64_t limit)
+    {
+        struct InstantiationArgs2 *args = nullptr;
+
+        deinstantiate();
+        if (running_mode != Mode_Default)
+            EXPECT_TRUE(wasm_runtime_set_default_running_mode(running_mode));
+        EXPECT_TRUE(wasm_runtime_instantiation_args_create(&args));
+        if (!args)
+            return false;
+        wasm_runtime_instantiation_args_set_default_stack_size(args,
+                                                               stack_size);
+        wasm_runtime_instantiation_args_set_instruction_count_limit(args,
+                                                                    limit);
+        module_inst = wasm_runtime_instantiate_ex2(module, args, error_buf,
+                                                   sizeof(error_buf));
+        wasm_runtime_instantiation_args_destroy(args);
+        if (!module_inst)
+            return false;
+        exec_env = wasm_runtime_create_exec_env(module_inst, stack_size);
+        return exec_env != nullptr;
     }
 
     bool enforced()
@@ -838,6 +881,91 @@ TEST_P(InstructionLimitTest, every_call_has_the_whole_limit)
     EXPECT_EQ(call("loop_br", { 1000000 }, &result), LIMIT_EXCEEDED);
     EXPECT_EQ(call("loop_br", { 100 }, &result), RETURNED);
     EXPECT_EQ(result, 100u);
+}
+
+/*
+ * What the runtime runs by itself
+ */
+
+/* The functions which the runtime runs when it instantiates a module run
+   under the limit that the instance is given */
+TEST_P(InstructionLimitTest, functions_run_at_instantiation)
+{
+    uint32_t result = 0;
+
+    LOAD_ENFORCED("init.wasm");
+
+    /* the start function, __post_instantiate, __wasm_call_ctors */
+    for (int which : { 0, 1, 2 }) {
+        SCOPED_TRACE(which);
+        rounds_of[which] = without_end;
+        EXPECT_FALSE(instantiate_with_limit(100000));
+        EXPECT_NE(std::string(error_buf).find("instruction limit exceeded"),
+                  std::string::npos)
+            << error_buf;
+        rounds_of[which] = 10;
+    }
+
+    /* Each of them has the whole limit */
+    for (uint32_t &r : rounds_of)
+        r = 1000;
+    ASSERT_TRUE(instantiate_with_limit(-1)) << error_buf;
+    int count = cost("count", { 1000 });
+    EXPECT_FALSE(instantiate_with_limit(count / 2));
+    ASSERT_TRUE(instantiate_with_limit(count + 100)) << error_buf;
+    EXPECT_EQ(call("ran", {}, -1, &result), RETURNED);
+    EXPECT_EQ(result, 7u);
+}
+
+/* The malloc and free of a module, which the runtime runs for the host
+   with an exec env of its own when no call into the module is running,
+   run under the limit that the instance was given */
+TEST_P(InstructionLimitTest, malloc_and_free_of_the_module)
+{
+    uint32_t result = 0;
+    void *native_addr = nullptr;
+
+    LOAD_ENFORCED("init.wasm");
+
+    ASSERT_TRUE(instantiate_with_limit(100000)) << error_buf;
+
+    EXPECT_EQ(wasm_runtime_module_malloc(module_inst, 16, &native_addr), 1024u);
+    wasm_runtime_module_free(module_inst, 1024);
+    EXPECT_EQ(wasm_runtime_get_exception(module_inst), nullptr);
+    EXPECT_EQ(call("ran", {}, -1, &result), RETURNED);
+    EXPECT_EQ(result, 31u);
+
+    rounds_of[3] = without_end;
+    EXPECT_EQ(wasm_runtime_module_malloc(module_inst, 16, &native_addr), 0u);
+    EXPECT_STREQ(wasm_runtime_get_exception(module_inst), limit_exception);
+    wasm_runtime_clear_exception(module_inst);
+
+    rounds_of[4] = without_end;
+    wasm_runtime_module_free(module_inst, 1024);
+    EXPECT_STREQ(wasm_runtime_get_exception(module_inst), limit_exception);
+    wasm_runtime_clear_exception(module_inst);
+}
+
+/* An exec env starts with the limit that the instance was given */
+TEST_P(InstructionLimitTest, exec_env_starts_with_the_limit_of_the_instance)
+{
+    uint32_t result = 0;
+
+    LOAD_ENFORCED("init.wasm");
+
+    ASSERT_TRUE(instantiate_with_limit(1000)) << error_buf;
+    EXPECT_EQ(call("count", { 100000 }, &result), LIMIT_EXCEEDED);
+    EXPECT_EQ(call("count", { 10 }, &result), RETURNED);
+    EXPECT_EQ(result, 10u);
+
+    /* until it is given one of its own */
+    EXPECT_EQ(call("count", { 100000 }, -1, &result), RETURNED);
+    EXPECT_EQ(result, 100000u);
+
+    /* and it starts with none if the instance was given none */
+    instantiate();
+    EXPECT_EQ(call("count", { 100000 }, &result), RETURNED);
+    EXPECT_EQ(result, 100000u);
 }
 
 /*

@@ -791,6 +791,34 @@ WASM_RUNTIME_API_EXTERN void
 wasm_runtime_instantiation_args_set_custom_data(struct InstantiationArgs2 *p,
                                                 void *custom_data);
 
+/**
+ * Set the instruction count limit that the execution environments of the
+ * module instance start with, see
+ * wasm_runtime_set_instruction_count_limit(). By default it is -1, which
+ * means no limit.
+ *
+ * This is how to limit what the runtime runs with an execution
+ * environment that it creates by itself:
+ * - the start function of the module and the functions "_initialize",
+ *   "__post_instantiate" and "__wasm_call_ctors" that it exports, which
+ *   are run when the module is instantiated. The module instance is in
+ *   the default running mode of the runtime then, see
+ *   wasm_runtime_set_default_running_mode(), and the limit is ignored in
+ *   the modes that
+ *   wasm_runtime_is_instruction_count_limit_enforced() tells of.
+ * - the "malloc" and "free" that the module exports, which are run for
+ *   wasm_runtime_module_malloc(), wasm_runtime_module_free() and the
+ *   like when no call into the module instance is running.
+ * The execution environments that are created with
+ * wasm_runtime_create_exec_env() start with the limit as well.
+ *
+ * Note: this function is only available when the runtime is built with
+ * WAMR_BUILD_INSTRUCTION_METERING=1.
+ */
+WASM_RUNTIME_API_EXTERN void
+wasm_runtime_instantiation_args_set_instruction_count_limit(
+    struct InstantiationArgs2 *p, int64_t instruction_count);
+
 WASM_RUNTIME_API_EXTERN void
 wasm_runtime_instantiation_args_set_wasi_arg(struct InstantiationArgs2 *p,
                                              char *argv[], int argc);
@@ -1974,8 +2002,9 @@ wasm_runtime_set_native_stack_boundary(wasm_exec_env_t exec_env,
  * JIT running modes, see wasm_runtime_is_instruction_count_limit_enforced().
  * It doesn't apply to what the runtime runs with an execution environment
  * of its own, like the start function of a module when it is
- * instantiated, and it isn't passed on to the threads that a module
- * creates.
+ * instantiated: that takes the limit which is set with
+ * wasm_runtime_instantiation_args_set_instruction_count_limit(). And it
+ * isn't passed on to the threads that a module creates.
  *
  * Note: this function is only available when the runtime is built with
  * WAMR_BUILD_INSTRUCTION_METERING=1.

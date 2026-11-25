@@ -1687,6 +1687,9 @@ void
 wasm_runtime_instantiation_args_set_defaults(struct InstantiationArgs2 *args)
 {
     memset(args, 0, sizeof(*args));
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    args->instruction_count_limit = -1;
+#endif
 #if WASM_ENABLE_LIBC_WASI != 0
     wasi_args_set_defaults(&args->wasi);
 #endif
@@ -1762,6 +1765,15 @@ wasm_runtime_instantiation_args_set_custom_data(struct InstantiationArgs2 *p,
 {
     p->custom_data = custom_data;
 }
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+void
+wasm_runtime_instantiation_args_set_instruction_count_limit(
+    struct InstantiationArgs2 *p, int64 instruction_count)
+{
+    p->instruction_count_limit = instruction_count;
+}
+#endif
 
 #if WASM_ENABLE_LIBC_WASI != 0
 void
@@ -2574,6 +2586,26 @@ wasm_runtime_set_instruction_count_limit64(WASMExecEnv *exec_env,
                                            int64 instructions_to_execute)
 {
     exec_env->instructions_to_execute = instructions_to_execute;
+}
+
+int64
+wasm_runtime_get_instruction_count_limit(WASMModuleInstanceCommon *module_inst)
+{
+    WASMModuleInstanceExtraCommon *common = NULL;
+
+#if WASM_ENABLE_INTERP != 0
+    if (module_inst->module_type == Wasm_Module_Bytecode
+        && ((WASMModuleInstance *)module_inst)->e)
+        common = &((WASMModuleInstance *)module_inst)->e->common;
+#endif
+#if WASM_ENABLE_AOT != 0
+    if (module_inst->module_type == Wasm_Module_AoT
+        && ((AOTModuleInstance *)module_inst)->e)
+        common =
+            &((AOTModuleInstanceExtra *)((AOTModuleInstance *)module_inst)->e)
+                 ->common;
+#endif
+    return common ? common->instruction_count_limit : -1;
 }
 #endif
 

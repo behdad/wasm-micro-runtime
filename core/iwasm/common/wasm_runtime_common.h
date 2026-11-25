@@ -618,6 +618,9 @@ wasm_runtime_get_exec_env_tls(void);
 struct InstantiationArgs2 {
     InstantiationArgs v1;
     void *custom_data;
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    int64 instruction_count_limit;
+#endif
 #if WASM_ENABLE_LIBC_WASI != 0
     WASIArguments wasi;
 #endif
@@ -746,6 +749,13 @@ wasm_runtime_instantiation_args_set_max_memory_pages(
 WASM_RUNTIME_API_EXTERN void
 wasm_runtime_instantiation_args_set_custom_data(struct InstantiationArgs2 *p,
                                                 void *custom_data);
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+/* See wasm_export.h for description */
+WASM_RUNTIME_API_EXTERN void
+wasm_runtime_instantiation_args_set_instruction_count_limit(
+    struct InstantiationArgs2 *p, int64 instruction_count);
+#endif
 
 /* See wasm_export.h for description */
 WASM_RUNTIME_API_EXTERN void
@@ -898,6 +908,12 @@ wasm_runtime_set_instruction_count_limit(WASMExecEnv *exec_env,
 WASM_RUNTIME_API_EXTERN void
 wasm_runtime_set_instruction_count_limit64(WASMExecEnv *exec_env,
                                            int64 instructions_to_execute);
+
+/* The instruction count limit that the exec envs of a module instance
+   start with, see
+   wasm_runtime_instantiation_args_set_instruction_count_limit() */
+int64
+wasm_runtime_get_instruction_count_limit(WASMModuleInstanceCommon *module_inst);
 #endif
 
 /* See wasm_export.h for description */

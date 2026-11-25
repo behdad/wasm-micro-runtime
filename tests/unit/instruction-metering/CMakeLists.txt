@@ -53,7 +53,7 @@ foreach (labels_as_values 1 0)
     WASM_ENABLE_LABELS_AS_VALUES=${labels_as_values})
   target_link_libraries (${test_target} ${LLVM_AVAILABLE_LIBS} gtest_main)
 
-  foreach (fixture control forever nested)
+  foreach (fixture control forever nested init)
     wamr_unit_test_compile_wat_to_wasm (
       TARGET ${test_target}
       SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/wasm-apps/${fixture}.wat

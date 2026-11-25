@@ -341,6 +341,11 @@ typedef struct WASMModuleInstanceExtraCommon {
 #if WASM_ENABLE_THREAD_MGR != 0
     korp_mutex exception_lock;
 #endif
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* The instruction count limit that the exec envs of the module
+       instance start with */
+    int64 instruction_count_limit;
+#endif
 } WASMModuleInstanceExtraCommon;
 
 /* Extra info of WASM module instance for interpreter/jit mode */

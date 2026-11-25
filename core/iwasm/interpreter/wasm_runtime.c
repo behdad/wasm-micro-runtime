@@ -2524,6 +2524,13 @@ wasm_instantiate(WASMModule *module, WASMModuleInstance *parent,
         (WASMModuleInstanceExtra *)((uint8 *)module_inst + extra_info_offset);
     wasm_runtime_set_custom_data_internal(
         (WASMModuleInstanceCommon *)module_inst, args->custom_data);
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* The instance of a thread starts its exec envs with the limit of
+       the instance that it was made from */
+    module_inst->e->common.instruction_count_limit =
+        parent ? parent->e->common.instruction_count_limit
+               : args->instruction_count_limit;
+#endif
 #if WASM_ENABLE_THREAD_MGR != 0
     if (os_mutex_init(&module_inst->e->common.exception_lock) != 0) {
         wasm_runtime_free(module_inst);
