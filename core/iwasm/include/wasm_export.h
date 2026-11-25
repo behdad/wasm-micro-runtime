@@ -1986,15 +1986,22 @@ wasm_runtime_set_native_stack_boundary(wasm_exec_env_t exec_env,
  *
  * What an instruction is depends on the running mode:
  * - The classic interpreter counts every opcode it executes.
- * - The Fast JIT counts the same opcodes, so a call returns under a
- *   limit in it if and only if it does in the classic interpreter. Its
- *   code counts the opcodes that are executed one after another all at
- *   once, before it executes them: it may terminate a call some opcodes
- *   before the limit, never after it, and it reports a trap only if the
- *   limit isn't reached by the opcodes counted together with the one
- *   that traps.
+ * - The Fast JIT counts the same: a call in which nothing traps counts
+ *   what it counts in the classic interpreter, and returns under a limit
+ *   in the one if and only if it does in the other. Its code counts the
+ *   opcodes that are executed one after another all at once, before it
+ *   executes them. So it may terminate a call some opcodes before the
+ *   limit, never after it. It reports a trap only if the limit covers
+ *   the opcodes that are counted together with the one that traps. And
+ *   when a native function goes on after a call that it made has
+ *   trapped, those opcodes stay counted: such a call may need a higher
+ *   limit than in the classic interpreter, never a lower one.
  * - The fast interpreter counts the operations which the loader turns
  *   the opcodes into, and there are fewer of them.
+ * The interpreter of a runtime that is built with the Fast JIT is the
+ * classic one. A call that uses up the operand stack or the native stack
+ * is terminated for that at a different place in each of them, as they
+ * use the stacks differently.
  * An instruction counts as one, and so does a call of a native function
  * whatever the function does. What handles a block of memory counts
  * more, in every running mode: memory.fill, memory.copy and memory.init
