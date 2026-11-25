@@ -16,6 +16,7 @@
 #include "aot_emit_parametric.h"
 #include "aot_emit_table.h"
 #include "aot_emit_gc.h"
+#include "aot_emit_metering.h"
 #include "aot_stack_frame_comp.h"
 #include "simd/simd_access_lanes.h"
 #include "simd/simd_bitmask_extracts.h"
@@ -1057,6 +1058,11 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
         if (location != NULL) {
             LLVMSetCurrentDebugLocation2(comp_ctx->builder, location);
         }
+#endif
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+        if (!aot_metering_count_opcode(comp_ctx, func_ctx))
+            return false;
 #endif
 
         switch (opcode) {

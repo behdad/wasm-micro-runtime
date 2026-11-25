@@ -8,6 +8,7 @@
 #include "aot_compiler.h"
 #include "aot_emit_exception.h"
 #include "aot_emit_table.h"
+#include "aot_emit_metering.h"
 #include "../aot/aot_runtime.h"
 #include "../aot/aot_intrinsic.h"
 #include "../interpreter/wasm_runtime.h"
@@ -1957,6 +1958,13 @@ aot_create_func_context(const AOTCompData *comp_data, AOTCompContext *comp_ctx,
         goto fail;
     }
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* Load the instructions that the exec env has left */
+    if (!aot_metering_create_count(comp_ctx, func_ctx)) {
+        goto fail;
+    }
+#endif
+
 #if WASM_ENABLE_BRANCH_HINTS != 0
     func_ctx->function_hints =
         comp_ctx->comp_data->function_hints
@@ -2816,6 +2824,16 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
 
     if (option->enable_extended_const)
         comp_ctx->enable_extended_const = true;
+
+    if (option->enable_instruction_metering) {
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+        comp_ctx->enable_instruction_metering = true;
+#else
+        aot_set_last_error("instruction metering is not enabled "
+                           "in this build");
+        goto fail;
+#endif
+    }
 
     comp_ctx->opt_level = option->opt_level;
     comp_ctx->size_level = option->size_level;

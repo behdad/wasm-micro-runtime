@@ -276,6 +276,24 @@ typedef struct AOTFuncContext {
 
     unsigned int stack_consumption_for_func_call;
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* The address of exec_env->instructions_left, and the local variable
+       of the function which caches it */
+    LLVMValueRef instructions_left_addr;
+    LLVMValueRef instructions_left;
+    /* Where the code goes when the call has no instructions left */
+    LLVMBasicBlockRef instruction_limit_exceeded_block;
+    /* The insn that takes the count of the run of opcodes, which the
+       code pays for at once, off the instructions left, NULL if there
+       is no run now, and the instructions counted in the run so far */
+    LLVMValueRef metering_insn;
+    uint64 metering_count;
+    /* Whether the opcode before the next one has paid for it */
+    bool metering_prepaid;
+    /* Whether the local variables of the function have been paid for */
+    bool metering_frame_counted;
+#endif
+
     LLVMValueRef locals[1];
 } AOTFuncContext;
 
@@ -504,6 +522,9 @@ typedef struct AOTCompContext {
 
     bool enable_shared_heap;
     bool enable_shared_chain;
+
+    /* Count the instructions and stop at the instruction count limit */
+    bool enable_instruction_metering;
 
     uint32 opt_level;
     uint32 size_level;

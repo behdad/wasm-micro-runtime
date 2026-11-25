@@ -7,6 +7,7 @@
 #include "aot_emit_exception.h"
 #include "aot_emit_control.h"
 #include "aot_emit_table.h"
+#include "aot_emit_metering.h"
 #include "aot_stack_frame_comp.h"
 #include "../aot/aot_runtime.h"
 #if WASM_ENABLE_GC != 0
@@ -1865,6 +1866,12 @@ aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
             goto fail;
     }
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* A tail call is followed by the return */
+    if (!tail_call && !aot_metering_end_call(comp_ctx, func_ctx))
+        goto fail;
+#endif
+
     ret = true;
 fail:
     if (param_types)
@@ -2733,6 +2740,11 @@ aot_compile_op_call_indirect(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
             goto fail;
     }
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    if (!aot_metering_end_call(comp_ctx, func_ctx))
+        goto fail;
+#endif
+
     ret = true;
 
 fail:
@@ -3240,6 +3252,12 @@ aot_compile_op_call_ref(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         if (!check_suspend_flags(comp_ctx, func_ctx, false))
             goto fail;
     }
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* A tail call is followed by the return */
+    if (!tail_call && !aot_metering_end_call(comp_ctx, func_ctx))
+        goto fail;
+#endif
 
     ret = true;
 

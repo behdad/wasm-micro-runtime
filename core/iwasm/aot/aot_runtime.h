@@ -35,6 +35,9 @@ extern "C" {
  * and not at the beginning of each function call */
 #define WASM_FEATURE_FRAME_PER_FUNCTION (1 << 12)
 #define WASM_FEATURE_FRAME_NO_FUNC_IDX (1 << 13)
+/* The code counts the instructions it executes and stops at the
+ * instruction count limit */
+#define WASM_FEATURE_INSTRUCTION_METERING (1 << 14)
 
 typedef enum AOTSectionType {
     AOT_SECTION_TYPE_TARGET_INFO = 0,
@@ -138,6 +141,11 @@ typedef struct AOTModuleInstanceExtra {
     ExportFuncMap *export_func_maps;
     AOTFunctionInstance **functions;
     uint32 function_count;
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* The exec env of the innermost call into the module instance that
+       is running, NULL if there is none */
+    WASMExecEnv *running_exec_env;
+#endif
 #if WASM_ENABLE_MULTI_MODULE != 0
     bh_list sub_module_inst_list_head;
     bh_list *sub_module_inst_list;
@@ -356,7 +364,7 @@ typedef struct AOTModule {
     uint8 *merged_data_text_sections;
     uint32 merged_data_text_sections_size;
 
-#if WASM_ENABLE_AOT_STACK_FRAME != 0
+#if WASM_ENABLE_AOT_STACK_FRAME != 0 || WASM_ENABLE_INSTRUCTION_METERING != 0
     uint32 feature_flags;
 #endif
 } AOTModule;

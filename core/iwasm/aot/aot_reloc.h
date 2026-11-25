@@ -192,6 +192,14 @@ typedef struct {
 #define REG_SHARED_HEAP_SYM()
 #endif
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+#define REG_INSTRUCTION_METERING_SYM()                \
+    REG_SYM(wasm_runtime_instruction_limit_exceeded), \
+    REG_SYM(wasm_runtime_refill_instruction_count),
+#else
+#define REG_INSTRUCTION_METERING_SYM()
+#endif
+
 #define REG_COMMON_SYMBOLS                \
     REG_SYM(aot_set_exception_with_id),   \
     REG_SYM(aot_invoke_native),           \
@@ -226,6 +234,7 @@ typedef struct {
     REG_GC_SYM()                          \
     REG_STRINGREF_SYM()                   \
     REG_SHARED_HEAP_SYM()                 \
+    REG_INSTRUCTION_METERING_SYM()        \
 
 #define CHECK_RELOC_OFFSET(data_size) do {              \
     if (!check_reloc_offset(target_section_size,        \

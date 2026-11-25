@@ -3731,10 +3731,17 @@ interp_call_wasm(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
        finds the exec env of the call here, and counts against its
        instruction count limit */
     WASMExecEnv *exec_env_outer = module_inst->e->running_exec_env;
+    /* The outermost call on the exec env gets the whole limit, the calls
+       nested in it go on with what it has left */
+    bool is_outermost = wasm_exec_env_start_instruction_count(
+        exec_env, wasm_runtime_is_instruction_count_limit_enforced(
+                      (WASMModuleInstanceCommon *)module_inst));
 
     module_inst->e->running_exec_env = exec_env;
     interp_call_wasm_internal(module_inst, exec_env, function, argc, argv);
     module_inst->e->running_exec_env = exec_env_outer;
+    if (is_outermost)
+        wasm_exec_env_end_instruction_count(exec_env);
 }
 #else
 #define interp_call_wasm interp_call_wasm_internal

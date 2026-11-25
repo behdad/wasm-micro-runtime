@@ -914,6 +914,32 @@ wasm_runtime_set_instruction_count_limit64(WASMExecEnv *exec_env,
    wasm_runtime_instantiation_args_set_instruction_count_limit() */
 int64
 wasm_runtime_get_instruction_count_limit(WASMModuleInstanceCommon *module_inst);
+
+#if WASM_ENABLE_AOT != 0
+/**
+ * Throw the exception "instruction limit exceeded". The code of LLVM JIT
+ * and AOT calls it when the call has no instructions left, and returns
+ * then.
+ *
+ * @param exec_env the execution environment the call is made with
+ */
+void
+wasm_runtime_instruction_limit_exceeded(WASMExecEnv *exec_env);
+
+/**
+ * Fill up the count of the instructions that a call has left. The code
+ * of LLVM JIT and AOT for a target with 32-bit words calls it when it has
+ * taken more off exec_env->instructions_left than was there: a machine
+ * word of 32 bits doesn't hold all of a limit.
+ *
+ * @param exec_env the execution environment the call is made with
+ *
+ * @return what the count goes on with, or a number below zero if the call
+ *         has no more left than that
+ */
+intptr_t
+wasm_runtime_refill_instruction_count(WASMExecEnv *exec_env);
+#endif
 #endif
 
 /* See wasm_export.h for description */

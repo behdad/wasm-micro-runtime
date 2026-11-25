@@ -5,6 +5,7 @@
 
 #include "aot_emit_table.h"
 #include "aot_emit_exception.h"
+#include "aot_emit_metering.h"
 #include "../aot/aot_runtime.h"
 #if WASM_ENABLE_GC != 0
 #include "aot_emit_gc.h"
@@ -470,6 +471,13 @@ aot_compile_op_table_init(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         goto fail;
     }
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    if (!aot_metering_count_units(comp_ctx, func_ctx, param_values[3],
+                                  WASM_METERING_BYTES_PER_INSTRUCTION
+                                      / WASM_METERING_BYTES_PER_TABLE_ELEM))
+        goto fail;
+#endif
+
     /* "" means return void */
     if (!(LLVMBuildCall2(comp_ctx->builder, func_type, func, param_values, 6,
                          ""))) {
@@ -543,6 +551,13 @@ aot_compile_op_table_copy(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
                                       tbl_idx)) {
         goto fail;
     }
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    if (!aot_metering_count_units(comp_ctx, func_ctx, param_values[3],
+                                  WASM_METERING_BYTES_PER_INSTRUCTION
+                                      / WASM_METERING_BYTES_PER_TABLE_ELEM))
+        goto fail;
+#endif
 
     /* "" means return void */
     if (!(LLVMBuildCall2(comp_ctx->builder, func_type, func, param_values, 6,
@@ -731,6 +746,13 @@ aot_compile_op_table_fill(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
                                       tbl_idx)) {
         goto fail;
     }
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    if (!aot_metering_count_units(comp_ctx, func_ctx, param_values[2],
+                                  WASM_METERING_BYTES_PER_INSTRUCTION
+                                      / WASM_METERING_BYTES_PER_TABLE_ELEM))
+        goto fail;
+#endif
 
     /* "" means return void */
     if (!(LLVMBuildCall2(comp_ctx->builder, func_type, func, param_values, 5,
