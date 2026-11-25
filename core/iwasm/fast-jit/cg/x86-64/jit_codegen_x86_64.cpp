@@ -9400,7 +9400,11 @@ jit_codegen_init()
         *(int32 *)(stream_old - 4) = (int32)(stream_new - stream_old);
     }
 
-    /* Load compiled func ptr and call it */
+    /* Load the jitted code of the function and call it. It isn't loaded
+       from module->fast_jit_func_ptrs: in a runtime that can tier up,
+       that pointer may have been switched to the code which calls the
+       function of LLVM JIT by now, and a module instance in Fast JIT
+       mode must not run that. */
     {
         /* rsi = module->import_function_count */
         x86::Mem m1(x86::r13,
@@ -9408,12 +9412,16 @@ jit_codegen_init()
         a.movzx(x86::rsi, m1);
         /* rbx = rbx - module->import_function_count */
         a.sub(x86::rbx, x86::rsi);
-        /* rax = module->fast_jit_func_ptrs */
-        x86::Mem m2(x86::r13, (uint32)offsetof(WASMModule, fast_jit_func_ptrs));
+        /* rax = module->functions */
+        const x86::Mem m2(x86::r13, (uint32)offsetof(WASMModule, functions));
         a.mov(x86::rax, m2);
-        /* rax = fast_jit_func_ptrs[rbx] */
+        /* rax = module->functions[rbx] */
         x86::Mem m3(x86::rax, x86::rbx, 3, 0);
         a.mov(x86::rax, m3);
+        /* rax = module->functions[rbx]->fast_jit_jitted_code */
+        const x86::Mem m4(x86::rax,
+                          (uint32)offsetof(WASMFunction, fast_jit_jitted_code));
+        a.mov(x86::rax, m4);
         a.jmp(x86::rax);
     }
 

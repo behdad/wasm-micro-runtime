@@ -12,6 +12,11 @@
 #include "gtest/gtest.h"
 #include "wasm_runtime_common.h"
 #include "bh_platform.h"
+#if WASM_ENABLE_JIT != 0 && WASM_ENABLE_FAST_JIT != 0 \
+    && WASM_ENABLE_LAZY_JIT != 0
+#include "wasm_runtime.h"
+#include "jit_compiler.h"
+#endif
 
 namespace {
 
@@ -349,6 +354,52 @@ TEST_F(InstructionLimitTestBase, ignored_by_the_llvm_jit)
     EXPECT_FALSE(enforced());
     EXPECT_EQ(call("loop_br", { 100000 }, 10, &result), RETURNED);
     EXPECT_EQ(result, 100000u);
+}
+#endif
+
+#if WASM_ENABLE_JIT != 0 && WASM_ENABLE_FAST_JIT != 0 \
+    && WASM_ENABLE_LAZY_JIT != 0
+/* A module instance in Fast JIT mode runs the code of Fast JIT, which
+   counts, also when the function has tiered up to LLVM JIT for the
+   instances in Multi-tier JIT mode, and also when it is called through
+   the stub that compiles a function at its first call */
+TEST_F(InstructionLimitTestBase, fast_jit_mode_stays_out_of_llvm_jit_code)
+{
+    uint32_t result = 0;
+
+    /* LLVM JIT compiles the functions of a module that has an instance
+       in a mode which runs them */
+    running_mode = Mode_Multi_Tier_JIT;
+    LOAD("control.wasm");
+
+    /* Call the function until it has tiered up: the code of LLVM JIT
+       doesn't count */
+    for (int tries = 0;; tries++) {
+        ASSERT_EQ(call("loop_br", { 10 }, -1, &result), RETURNED);
+        if (exec_env->instructions_left == INTPTR_MAX)
+            break;
+        if (tries == 6000) {
+            GTEST_SKIP() << "the function didn't tier up within a minute";
+        }
+        os_usleep(10000);
+    }
+
+    ASSERT_TRUE(wasm_runtime_set_running_mode(module_inst, Mode_Fast_JIT));
+    EXPECT_EQ(call("loop_br", { 100000 }, 10, &result), LIMIT_EXCEEDED);
+
+    /* A call that found the function not compiled yet goes through the
+       stub, which may get its turn only after the function has tiered
+       up. Put the stub back into the table of the instance to make
+       such a call. */
+    WASMModuleInstance *inst = (WASMModuleInstance *)module_inst;
+    WASMFunctionInstance *func =
+        (WASMFunctionInstance *)wasm_runtime_lookup_function(module_inst,
+                                                             "loop_br");
+    ASSERT_NE(func, nullptr);
+    uint32 func_idx = (uint32)(func - inst->e->functions);
+    inst->fast_jit_func_ptrs[func_idx - inst->module->import_function_count] =
+        jit_compiler_get_jit_globals()->compile_fast_jit_and_then_call;
+    EXPECT_EQ(call("loop_br", { 100000 }, 10, &result), LIMIT_EXCEEDED);
 }
 #endif
 
