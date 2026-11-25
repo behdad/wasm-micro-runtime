@@ -39,8 +39,12 @@ jobs:
           - build_target: X86_64
             run_mode: aot
             run_mode_options: "-DWAMR_BUILD_AOT=1"
-          # fast-jit and multi-tier-jit are not tested here yet because no unit
-          # test suite currently declares cases for those run modes.
+          - build_target: X86_64
+            run_mode: fast-jit
+            run_mode_options: "-DWAMR_BUILD_FAST_JIT=1"
+          - build_target: X86_64
+            run_mode: multi-tier-jit
+            run_mode_options: "-DWAMR_BUILD_JIT=1 -DWAMR_BUILD_FAST_JIT=1"
           - build_target: X86_32
             run_mode: classic-interp
             run_mode_options: ""
