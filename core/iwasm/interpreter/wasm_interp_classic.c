@@ -1547,15 +1547,48 @@ get_global_addr(uint8 *global_data, WASMGlobalInstance *global)
 }
 
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
-#define CHECK_INSTRUCTION_LIMIT()                                 \
-    if (instructions_left == 0) {                                 \
-        wasm_set_exception(module, "instruction limit exceeded"); \
-        goto got_exception;                                       \
-    }                                                             \
-    else if (instructions_left > 0)                               \
-        instructions_left--;
+#if WASM_ENABLE_LABELS_AS_VALUES != 0 && defined(__clang__)
+/* An empty asm statement, which generates no code and which clang
+   doesn't move code across. It keeps the store before it in the handler
+   it was written in. Without it clang moves the stores of all the
+   handlers into one block, in front of the indirect jump that they
+   share until it is copied into each of them, and generates slower
+   code. */
+#define KEEP_IN_HANDLER() __asm__ volatile("")
+#else
+#define KEEP_IN_HANDLER() (void)0
+#endif
+
+/* The instructions that the call has left are counted in a local
+   variable and stored into the exec env every time: that is where the
+   calls nested in this one find what is left, and it is up to date when
+   the interpreter is left by a longjmp from the signal handler. */
+#define CHECK_INSTRUCTION_LIMIT()                        \
+    do {                                                 \
+        if (--instructions_left < 0)                     \
+            goto instructions_ran_out;                   \
+        exec_env->instructions_left = instructions_left; \
+        KEEP_IN_HANDLER();                               \
+    } while (0)
+/* After a call out of the interpreter: the calls nested in it have
+   counted in the exec env */
+#define RELOAD_INSTRUCTIONS_LEFT() \
+    instructions_left = exec_env->instructions_left
+/* Count what an instruction counts for a block of memory that it is
+   going to handle, see wasm_exec_env_count_bytes() */
+#define COUNT_INSTRUCTIONS_OF_BYTES(bytes)                            \
+    do {                                                              \
+        bool counted = wasm_exec_env_count_bytes(exec_env, bytes);    \
+        RELOAD_INSTRUCTIONS_LEFT();                                   \
+        if (!counted) {                                               \
+            wasm_set_exception(module, "instruction limit exceeded"); \
+            goto got_exception;                                       \
+        }                                                             \
+    } while (0)
 #else
 #define CHECK_INSTRUCTION_LIMIT() (void)0
+#define RELOAD_INSTRUCTIONS_LEFT() (void)0
+#define COUNT_INSTRUCTIONS_OF_BYTES(bytes) (void)0
 #endif
 
 static void
@@ -1603,10 +1636,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
     uint32 cache_index, type_index, param_cell_num, cell_num;
 
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
-    int instructions_left = -1;
-    if (exec_env) {
-        instructions_left = exec_env->instructions_to_execute;
-    }
+    intptr_t instructions_left = exec_env->instructions_left;
 #endif
 
 #if WASM_ENABLE_EXCE_HANDLING != 0
@@ -5736,6 +5766,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         bytes = (uint64)(uint32)POP_I32();
                         offset = (uint64)(uint32)POP_I32();
                         addr = (mem_offset_t)POP_MEM_OFFSET();
+                        COUNT_INSTRUCTIONS_OF_BYTES(bytes);
 
 #if WASM_ENABLE_THREAD_MGR != 0
                         linear_mem_size = get_linear_mem_size();
@@ -5795,6 +5826,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         len = POP_MEM_OFFSET();
                         src = POP_MEM_OFFSET();
                         dst = POP_MEM_OFFSET();
+                        COUNT_INSTRUCTIONS_OF_BYTES(len);
 
 #if WASM_ENABLE_MULTI_MEMORY != 0
                         /* dst memidx */
@@ -5883,6 +5915,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         len = POP_MEM_OFFSET();
                         fill_val = POP_I32();
                         dst = POP_MEM_OFFSET();
+                        COUNT_INSTRUCTIONS_OF_BYTES(len);
 
 #if WASM_ENABLE_THREAD_MGR != 0
                         linear_mem_size = get_linear_mem_size();
@@ -5934,6 +5967,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         n = (uint32)POP_I32();
                         s = (uint32)POP_I32();
                         d = (tbl_elem_idx_t)POP_TBL_ELEM_IDX();
+                        COUNT_INSTRUCTIONS_OF_BYTES(
+                            (uint64)n * WASM_METERING_BYTES_PER_TABLE_ELEM);
 
                         if (!bh_bitmap_get_bit(module->e->common.elem_dropped,
                                                elem_idx)) {
@@ -6036,6 +6071,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         is_table64 = dst_tbl_inst->is_table64;
 #endif
                         d = (tbl_elem_idx_t)POP_TBL_ELEM_IDX();
+                        COUNT_INSTRUCTIONS_OF_BYTES(
+                            (uint64)n * WASM_METERING_BYTES_PER_TABLE_ELEM);
 
                         if (
 #if WASM_ENABLE_MEMORY64 != 0
@@ -6140,6 +6177,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         fill_val = POP_REF();
 #endif
                         elem_idx = POP_TBL_ELEM_IDX();
+                        COUNT_INSTRUCTIONS_OF_BYTES(
+                            (uint64)n * WASM_METERING_BYTES_PER_TABLE_ELEM);
 
                         if (
 #if WASM_ENABLE_MEMORY64 != 0
@@ -6651,11 +6690,17 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
             if (cur_func->import_func_inst) {
                 wasm_interp_call_func_import(module, exec_env, cur_func,
                                              prev_frame);
+                RELOAD_INSTRUCTIONS_LEFT();
 #if WASM_ENABLE_TAIL_CALL != 0 || WASM_ENABLE_GC != 0
                 if (is_return_call) {
                     /* the frame was freed before tail calling and
-                       the prev_frame was set as exec_env's cur_frame,
-                       so here we recover context from prev_frame */
+                       the prev_frame was set as exec_env's cur_frame */
+                    if (!prev_frame->ip) {
+                        /* The function that made the tail call was
+                           called from native. */
+                        return;
+                    }
+                    /* so here we recover context from prev_frame */
                     RECOVER_CONTEXT(prev_frame);
                 }
                 else
@@ -6713,11 +6758,17 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
             {
                 wasm_interp_call_func_native(module, exec_env, cur_func,
                                              prev_frame);
+                RELOAD_INSTRUCTIONS_LEFT();
 #if WASM_ENABLE_TAIL_CALL != 0 || WASM_ENABLE_GC != 0
                 if (is_return_call) {
                     /* the frame was freed before tail calling and
-                       the prev_frame was set as exec_env's cur_frame,
-                       so here we recover context from prev_frame */
+                       the prev_frame was set as exec_env's cur_frame */
+                    if (!prev_frame->ip) {
+                        /* The function that made the tail call was
+                           called from native. */
+                        return;
+                    }
+                    /* so here we recover context from prev_frame */
                     RECOVER_CONTEXT(prev_frame);
                 }
                 else
@@ -6801,6 +6852,16 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                in loader), all_cell_num must be smaller than 1MB */
             bh_assert(all_cell_num < 1 * BH_MB);
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+            /* The local variables of the function, which are going to
+               be set to zero. If the call has too few instructions left
+               for them, it ends in the frame of the caller, like when
+               there is no room for the frame: a tail call has freed
+               its own. */
+            frame = prev_frame;
+            COUNT_INSTRUCTIONS_OF_BYTES((uint64)cur_func->local_cell_num * 4);
+#endif
+
             frame_size = wasm_interp_interp_frame_size(all_cell_num);
             if (!(frame = ALLOC_FRAME(exec_env, frame_size, prev_frame))) {
                 frame = prev_frame;
@@ -6881,6 +6942,23 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
 #endif
         HANDLE_OP_END();
     }
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    instructions_ran_out:
+        /* The count is a machine word, which may not hold all that the
+           call has left, and a call without a limit starts it again */
+        instructions_left = wasm_exec_env_refill_instruction_count(exec_env);
+        if (instructions_left <= 0) {
+            wasm_set_exception(module, "instruction limit exceeded");
+            goto got_exception;
+        }
+        exec_env->instructions_left = --instructions_left;
+#if WASM_ENABLE_LABELS_AS_VALUES != 0
+        FETCH_OPCODE_AND_DISPATCH();
+#else
+        continue;
+#endif
+#endif
 
 #if WASM_ENABLE_SHARED_MEMORY != 0
     unaligned_atomic:
@@ -7422,6 +7500,12 @@ wasm_interp_call_wasm(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
         return;
     }
     argc = function->param_cell_num;
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    wasm_exec_env_start_instruction_count(
+        exec_env, wasm_runtime_is_instruction_count_limit_enforced(
+                      (WASMModuleInstanceCommon *)module_inst));
+#endif
 
 #if defined(OS_ENABLE_HW_BOUND_CHECK) && WASM_DISABLE_STACK_HW_BOUND_CHECK == 0
     /*

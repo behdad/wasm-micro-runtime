@@ -791,6 +791,34 @@ WASM_RUNTIME_API_EXTERN void
 wasm_runtime_instantiation_args_set_custom_data(struct InstantiationArgs2 *p,
                                                 void *custom_data);
 
+/**
+ * Set the instruction count limit that the execution environments of the
+ * module instance start with, see
+ * wasm_runtime_set_instruction_count_limit(). By default it is -1, which
+ * means no limit.
+ *
+ * This is how to limit what the runtime runs with an execution
+ * environment that it creates by itself:
+ * - the start function of the module and the functions "_initialize",
+ *   "__post_instantiate" and "__wasm_call_ctors" that it exports, which
+ *   are run when the module is instantiated. The module instance is in
+ *   the default running mode of the runtime then, see
+ *   wasm_runtime_set_default_running_mode(), and the limit is ignored in
+ *   the modes that
+ *   wasm_runtime_is_instruction_count_limit_enforced() tells of.
+ * - the "malloc" and "free" that the module exports, which are run for
+ *   wasm_runtime_module_malloc(), wasm_runtime_module_free() and the
+ *   like when no call into the module instance is running.
+ * The execution environments that are created with
+ * wasm_runtime_create_exec_env() start with the limit as well.
+ *
+ * Note: this function is only available when the runtime is built with
+ * WAMR_BUILD_INSTRUCTION_METERING=1.
+ */
+WASM_RUNTIME_API_EXTERN void
+wasm_runtime_instantiation_args_set_instruction_count_limit(
+    struct InstantiationArgs2 *p, int64_t instruction_count);
+
 WASM_RUNTIME_API_EXTERN void
 wasm_runtime_instantiation_args_set_wasi_arg(struct InstantiationArgs2 *p,
                                              char *argv[], int argc);
@@ -1943,10 +1971,61 @@ wasm_runtime_set_native_stack_boundary(wasm_exec_env_t exec_env,
 
 /**
  * Set the instruction count limit to the execution environment.
- * By default the instruction count limit is -1, which means no limit.
- * However, if the instruction count limit is set to a positive value,
- * the execution will be terminated when the instruction count reaches
- * the limit.
+ * By default the instruction count limit is -1, which means no limit,
+ * as does any negative value. If the instruction count limit is set to
+ * zero or a positive value, a call into WASM code made with the execution
+ * environment is terminated with the exception "instruction limit
+ * exceeded" when the instruction count reaches the limit.
+ *
+ * The limit is for each call that the host makes with the execution
+ * environment, for example with wasm_runtime_call_wasm(), as a whole:
+ * the calls nested in it, which native functions or the runtime make on
+ * the same execution environment, count against the same limit, and the
+ * next call of the host has the whole limit again. A limit that is set
+ * while a call is running is for the calls after it.
+ *
+ * What an instruction is depends on the running mode:
+ * - The classic interpreter counts every opcode it executes.
+ * - The Fast JIT counts the same: a call in which nothing traps counts
+ *   what it counts in the classic interpreter, and returns under a limit
+ *   in the one if and only if it does in the other. Its code counts the
+ *   opcodes that are executed one after another all at once, before it
+ *   executes them. So it may terminate a call some opcodes before the
+ *   limit, never after it. It reports a trap only if the limit covers
+ *   the opcodes that are counted together with the one that traps. And
+ *   when a native function goes on after a call that it made has
+ *   trapped, those opcodes stay counted: such a call may need a higher
+ *   limit than in the classic interpreter, never a lower one.
+ * - The fast interpreter counts the operations which the loader turns
+ *   the opcodes into, and there are fewer of them.
+ * The interpreter of a runtime that is built with the Fast JIT is the
+ * classic one. A call that uses up the operand stack or the native stack
+ * is terminated for that at a different place in each of them, as they
+ * use the stacks differently.
+ * An instruction counts as one, and so does a call of a native function
+ * whatever the function does. What handles a block of memory counts
+ * more, in every running mode: memory.fill, memory.copy and memory.init
+ * count one more for every 64 bytes, table.fill, table.copy and
+ * table.init one more for every 8 table elements, and a call of a
+ * function of the module one more for every 64 bytes of the local
+ * variables of that function, which it sets to zero.
+ *
+ * The limit is ignored for AOT modules and in the LLVM JIT and Multi-tier
+ * JIT running modes, see wasm_runtime_is_instruction_count_limit_enforced().
+ * It doesn't apply to what the runtime runs with an execution environment
+ * of its own, like the start function of a module when it is
+ * instantiated: that takes the limit which is set with
+ * wasm_runtime_instantiation_args_set_instruction_count_limit().
+ *
+ * A thread that the module creates gets half of the instructions that
+ * the call which creates it has left, and the call goes on with the other
+ * half: the threads of a module together don't run more instructions
+ * than the limit allows the call. An execution environment that is made
+ * with wasm_runtime_spawn_exec_env() starts with the limit of the one it
+ * is made from.
+ *
+ * Note: this function is only available when the runtime is built with
+ * WAMR_BUILD_INSTRUCTION_METERING=1.
  *
  * @param exec_env the execution environment
  * @param instruction_count the instruction count limit
@@ -1954,6 +2033,46 @@ wasm_runtime_set_native_stack_boundary(wasm_exec_env_t exec_env,
 WASM_RUNTIME_API_EXTERN void
 wasm_runtime_set_instruction_count_limit(wasm_exec_env_t exec_env,
                                          int instruction_count);
+
+/**
+ * Set the instruction count limit to the execution environment, like
+ * wasm_runtime_set_instruction_count_limit() does, for a limit that
+ * doesn't fit into an int.
+ *
+ * Note: this function is only available when the runtime is built with
+ * WAMR_BUILD_INSTRUCTION_METERING=1.
+ *
+ * @param exec_env the execution environment
+ * @param instruction_count the instruction count limit
+ */
+WASM_RUNTIME_API_EXTERN void
+wasm_runtime_set_instruction_count_limit64(wasm_exec_env_t exec_env,
+                                           int64_t instruction_count);
+
+/**
+ * Check whether the instruction count limit, see
+ * wasm_runtime_set_instruction_count_limit(), is enforced for the calls
+ * that the host makes into a WASM module instance in the running mode
+ * it has now.
+ *
+ * It is enforced when the runtime was built with
+ * WAMR_BUILD_INSTRUCTION_METERING=1 and the module instance is of a wasm
+ * bytecode module and is in interpreter mode (Mode_Interp) or in Fast
+ * JIT mode (Mode_Fast_JIT).
+ * The limit is ignored for an AOT module and in the LLVM JIT and
+ * Multi-tier JIT modes: a call that the host makes into such a module
+ * instance has no limit.
+ *
+ * Check again after changing the running mode of the module instance.
+ *
+ * @param module_inst the WASM module instance
+ *
+ * @return true if the instruction count limit is enforced, false if it
+ *         is ignored
+ */
+WASM_RUNTIME_API_EXTERN bool
+wasm_runtime_is_instruction_count_limit_enforced(
+    wasm_module_inst_t module_inst);
 
 /**
  * Dump runtime memory consumption, including:

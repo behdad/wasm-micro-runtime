@@ -1966,6 +1966,14 @@ aot_instantiate(AOTModule *module, AOTModuleInstance *parent,
     extra = (AOTModuleInstanceExtra *)module_inst->e;
     wasm_runtime_set_custom_data_internal(
         (WASMModuleInstanceCommon *)module_inst, args->custom_data);
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* AOT code ignores the limit, this is for the exec envs to start
+       with the limit they were asked to start with all the same */
+    extra->common.instruction_count_limit =
+        parent ? ((AOTModuleInstanceExtra *)parent->e)
+                     ->common.instruction_count_limit
+               : args->instruction_count_limit;
+#endif
 #if WASM_ENABLE_THREAD_MGR != 0
     if (os_mutex_init(&extra->common.exception_lock) != 0) {
         wasm_runtime_free(module_inst);

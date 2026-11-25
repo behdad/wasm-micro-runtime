@@ -47,7 +47,6 @@ function help()
     echo "-A use the specified wamrc command instead of building it"
     echo "-N enable extended const expression feature"
     echo "-U enable full unit test (passes FULL_TEST=ON to cmake when -s unit is used)"
-    echo "   unit tests skip fast-jit and multi-tier-jit until cases are available"
     echo "-r [requirement name] [N [N ...]] specify a requirement name followed by one or more"
     echo "                                  subrequirement IDs, if no subrequirement is specificed,"
     echo "                                  it will run all subrequirements. When this optin is used,"
@@ -374,9 +373,11 @@ function unit_test()
 
     for unit_mode in "${TYPE[@]}"; do
         case ${unit_mode} in
-            fast-jit|multi-tier-jit)
-                echo "Skip unit tests in ${unit_mode}: no test cases available"
-                continue
+            fast-jit)
+                unit_mode_flags="${FAST_JIT_COMPILE_FLAGS}"
+                ;;
+            multi-tier-jit)
+                unit_mode_flags="${MULTI_TIER_JIT_COMPILE_FLAGS}"
                 ;;
             classic-interp)
                 unit_mode_flags="${CLASSIC_INTERP_COMPILE_FLAGS}"

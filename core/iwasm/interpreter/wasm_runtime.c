@@ -1851,6 +1851,13 @@ execute_malloc_function(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
             exec_env = wasm_clusters_search_exec_env(
                 (WASMModuleInstanceCommon *)module_inst);
 #endif
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+        /* The exec env of the call into the module instance that is
+           running, so that this call counts against the same
+           instruction count limit */
+        if (!exec_env)
+            exec_env = module_inst->e->running_exec_env;
+#endif
         if (!exec_env) {
             if (!(exec_env = exec_env_created = wasm_exec_env_create(
                       (WASMModuleInstanceCommon *)module_inst,
@@ -1940,6 +1947,13 @@ execute_free_function(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
         if (!exec_env)
             exec_env = wasm_clusters_search_exec_env(
                 (WASMModuleInstanceCommon *)module_inst);
+#endif
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+        /* The exec env of the call into the module instance that is
+           running, so that this call counts against the same
+           instruction count limit */
+        if (!exec_env)
+            exec_env = module_inst->e->running_exec_env;
 #endif
         if (!exec_env) {
             if (!(exec_env = exec_env_created = wasm_exec_env_create(
@@ -2524,6 +2538,13 @@ wasm_instantiate(WASMModule *module, WASMModuleInstance *parent,
         (WASMModuleInstanceExtra *)((uint8 *)module_inst + extra_info_offset);
     wasm_runtime_set_custom_data_internal(
         (WASMModuleInstanceCommon *)module_inst, args->custom_data);
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* The instance of a thread starts its exec envs with the limit of
+       the instance that it was made from */
+    module_inst->e->common.instruction_count_limit =
+        parent ? parent->e->common.instruction_count_limit
+               : args->instruction_count_limit;
+#endif
 #if WASM_ENABLE_THREAD_MGR != 0
     if (os_mutex_init(&module_inst->e->common.exception_lock) != 0) {
         wasm_runtime_free(module_inst);
@@ -3696,9 +3717,27 @@ call_wasm_with_hw_bound_check(WASMModuleInstance *module_inst,
     }
     (void)jmpbuf_node_pop;
 }
-#define interp_call_wasm call_wasm_with_hw_bound_check
+#define interp_call_wasm_internal call_wasm_with_hw_bound_check
 #else
-#define interp_call_wasm wasm_interp_call_wasm
+#define interp_call_wasm_internal wasm_interp_call_wasm
+#endif
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+static void
+interp_call_wasm(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
+                 WASMFunctionInstance *function, unsigned argc, uint32 argv[])
+{
+    /* What the runtime runs for the module instance during this call
+       finds the exec env of the call here, and counts against its
+       instruction count limit */
+    WASMExecEnv *exec_env_outer = module_inst->e->running_exec_env;
+
+    module_inst->e->running_exec_env = exec_env;
+    interp_call_wasm_internal(module_inst, exec_env, function, argc, argv);
+    module_inst->e->running_exec_env = exec_env_outer;
+}
+#else
+#define interp_call_wasm interp_call_wasm_internal
 #endif
 
 bool

@@ -76,7 +76,10 @@ typedef enum {
     REG_R13_IDX,
     REG_R14_IDX,
     REG_R15_IDX,
-    REG_I64_FREE_IDX = REG_RSI_IDX
+    REG_I64_FREE_IDX = REG_RSI_IDX,
+    /* Holds the instructions that the exec env has left, when the
+       instruction metering is enabled */
+    REG_I64_METER_IDX = REG_R14_IDX
 } RegIndexI64;
 
 /* clang-format off */
@@ -5418,6 +5421,54 @@ fail:
     return false;
 }
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+/**
+ * Encode meter insn, METER r0, r1
+ *
+ * The jitted code doesn't count in exec_env->instructions_left itself,
+ * where each subtraction would have to wait for the one before it to be
+ * stored. It keeps what is left in a register, which is reserved for
+ * that. The register is only a cache: each change of it is stored into
+ * the exec env at once, so the exec env is up to date whichever way the
+ * jitted code is left. The register is loaded where the count may have
+ * changed without the jitted code: when it is entered from outside, and
+ * after it has called a native function, which may have called wasm
+ * functions.
+ *
+ * @param cc the compiler context
+ * @param a the assembler to emit the code
+ * @param r0 dst jit register that contains the dst operand info
+ * @param r1 src jit register that contains the number of instructions
+ *        to take off the instructions that the exec env has left
+ *
+ * @return true if success, false if failed
+ */
+static bool
+lower_meter(JitCompContext *cc, x86::Assembler &a, JitReg r0, JitReg r1)
+{
+    const JitHardRegInfo *hreg_info = jit_codegen_get_hreg_info();
+    const x86::Mem m(regs_i64[hreg_info->exec_env_hreg_index],
+                     (uint32)offsetof(WASMExecEnv, instructions_left), 8);
+    Imm imm;
+
+    CHECK_KIND(r0, JIT_REG_KIND_I32);
+    CHECK_KIND(r1, JIT_REG_KIND_I32);
+    CHECK_CONST(r1);
+
+    /* The flags of the subtraction are those of comparing what was left
+       with r1, which is what the branch insn after this one tests, and
+       the mov doesn't change them */
+    imm.setValue(jit_cc_get_const_I32(cc, r1));
+    a.sub(regs_i64[REG_I64_METER_IDX], imm);
+    a.mov(m, regs_i64[REG_I64_METER_IDX]);
+    cc->last_cmp_on_fp = false;
+
+    return true;
+fail:
+    return false;
+}
+#endif /* end of WASM_ENABLE_INSTRUCTION_METERING != 0 */
+
 /**
  * Encode detecting the cmp flags in reg, and jmp to the relative address
  * according to the condition opcode
@@ -5978,6 +6029,16 @@ lower_callnative(JitCompContext *cc, x86::Assembler &a, JitInsn *insn)
     imm.setValue((uint64)func_ptr);
     a.mov(regs_i64[REG_RAX_IDX], imm);
     a.call(regs_i64[REG_RAX_IDX]);
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    {
+        /* The native function may have called wasm functions, which
+           counted: meter_reg = exec_env->instructions_left */
+        const JitHardRegInfo *hreg_info = jit_codegen_get_hreg_info();
+        const x86::Mem m(regs_i64[hreg_info->exec_env_hreg_index],
+                         (uint32)offsetof(WASMExecEnv, instructions_left), 8);
+        a.mov(regs_i64[REG_I64_METER_IDX], m);
+    }
+#endif
 
     if (ret_reg) {
         uint32 ret_reg_no = jit_reg_no(ret_reg);
@@ -7838,6 +7899,14 @@ jit_codegen_gen_native(JitCompContext *cc)
                         GOTO_FAIL;
                     break;
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+                case JIT_OP_METER:
+                    LOAD_2ARGS();
+                    if (!lower_meter(cc, a, r0, r1))
+                        GOTO_FAIL;
+                    break;
+#endif
+
                 case JIT_OP_SELECTEQ:
                 case JIT_OP_SELECTNE:
                 case JIT_OP_SELECTGTS:
@@ -9181,6 +9250,14 @@ jit_codegen_init()
 
     /* exec_env_reg = exec_env */
     a.mov(regs_i64[hreg_info->exec_env_hreg_index], x86::rdi);
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* meter_reg = exec_env->instructions_left */
+    {
+        const x86::Mem m(x86::rdi,
+                         (uint32)offsetof(WASMExecEnv, instructions_left), 8);
+        a.mov(regs_i64[REG_I64_METER_IDX], m);
+    }
+#endif
     /* fp_reg = info->frame */
     a.mov(x86::rbp, x86::ptr(x86::rsi, offsetof(JitInterpSwitchInfo, frame)));
     /* rdx = func_idx, is already set in the func_idx argument of
@@ -9323,7 +9400,11 @@ jit_codegen_init()
         *(int32 *)(stream_old - 4) = (int32)(stream_new - stream_old);
     }
 
-    /* Load compiled func ptr and call it */
+    /* Load the jitted code of the function and call it. It isn't loaded
+       from module->fast_jit_func_ptrs: in a runtime that can tier up,
+       that pointer may have been switched to the code which calls the
+       function of LLVM JIT by now, and a module instance in Fast JIT
+       mode must not run that. */
     {
         /* rsi = module->import_function_count */
         x86::Mem m1(x86::r13,
@@ -9331,12 +9412,16 @@ jit_codegen_init()
         a.movzx(x86::rsi, m1);
         /* rbx = rbx - module->import_function_count */
         a.sub(x86::rbx, x86::rsi);
-        /* rax = module->fast_jit_func_ptrs */
-        x86::Mem m2(x86::r13, (uint32)offsetof(WASMModule, fast_jit_func_ptrs));
+        /* rax = module->functions */
+        const x86::Mem m2(x86::r13, (uint32)offsetof(WASMModule, functions));
         a.mov(x86::rax, m2);
-        /* rax = fast_jit_func_ptrs[rbx] */
+        /* rax = module->functions[rbx] */
         x86::Mem m3(x86::rax, x86::rbx, 3, 0);
         a.mov(x86::rax, m3);
+        /* rax = module->functions[rbx]->fast_jit_jitted_code */
+        const x86::Mem m4(x86::rax,
+                          (uint32)offsetof(WASMFunction, fast_jit_jitted_code));
+        a.mov(x86::rax, m4);
         a.jmp(x86::rax);
     }
 
@@ -9390,8 +9475,14 @@ static const uint8 hreg_info_I32[3][7] = {
 static const uint8 hreg_info_I64[3][16] = {
     /* rbp, rax, rbx, rcx, rdx, rdi, rsi, rsp,
        r8,  r9,  r10, r11, r12, r13, r14, r15 */
+#if WASM_ENABLE_INSTRUCTION_METERING == 0
     { 1, 1, 1, 1, 1, 1, 1, 1,
       0, 0, 0, 0, 0, 0, 0, 1 }, /* fixed, rsi is freely used */
+#else
+    { 1, 1, 1, 1, 1, 1, 1, 1,
+      0, 0, 0, 0, 0, 0, 1, 1 }, /* fixed, rsi is freely used,
+                                   r14 is REG_I64_METER_IDX */
+#endif
     { 0, 1, 0, 1, 1, 1, 0, 0,
       1, 1, 1, 1, 0, 0, 0, 0 }, /* caller_saved_native */
     { 0, 1, 1, 1, 1, 1, 0, 0,

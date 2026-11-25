@@ -487,7 +487,7 @@ jit_compile_op_call_indirect(JitCompContext *cc, uint32 type_idx,
     JitReg tbl_size, offset, offset_i32;
     JitReg func_import, func_idx, tbl_elems, func_count;
     JitReg func_type_indexes, func_type_idx, fast_jit_func_ptrs;
-    JitReg offset1_i32, offset1, func_type_idx1, res;
+    JitReg offset1_i32, offset1, func_type_idx1, res, frame_sp;
     JitReg import_func_ptrs, jitted_code_idx, jitted_code;
     WASMType *func_type;
     uint32 n;
@@ -679,6 +679,16 @@ jit_compile_op_call_indirect(JitCompContext *cc, uint32 type_idx,
                 bh_assert(0);
                 goto fail;
         }
+
+        /* Add the results to the sp of the current frame: a jitted
+           callee does so when it returns, the native function that was
+           called here doesn't, and post_return in block func_return
+           takes it for done */
+        frame_sp = jit_cc_new_reg_ptr(cc);
+        GEN_INSN(ADD, frame_sp, cc->fp_reg,
+                 NEW_CONST(PTR, offset_of_local(n + func_type->ret_cell_num)));
+        GEN_INSN(STPTR, frame_sp, cc->fp_reg,
+                 NEW_CONST(I32, offsetof(WASMInterpFrame, sp)));
     }
 
     gen_commit_values(jit_frame, jit_frame->lp, jit_frame->sp);

@@ -84,6 +84,10 @@ typedef enum WASMExceptionID {
     EXCE_FAILED_TO_CREATE_STRINGVIEW,
     EXCE_FAILED_TO_ENCODE_STRING,
     EXCE_ALREADY_THROWN,
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* After EXCE_ALREADY_THROWN, whose value AOT code depends on */
+    EXCE_INSTRUCTION_LIMIT_EXCEEDED,
+#endif
     EXCE_NUM,
 } WASMExceptionID;
 
@@ -337,6 +341,11 @@ typedef struct WASMModuleInstanceExtraCommon {
 #if WASM_ENABLE_THREAD_MGR != 0
     korp_mutex exception_lock;
 #endif
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* The instruction count limit that the exec envs of the module
+       instance start with */
+    int64 instruction_count_limit;
+#endif
 } WASMModuleInstanceExtraCommon;
 
 /* Extra info of WASM module instance for interpreter/jit mode */
@@ -355,6 +364,12 @@ typedef struct WASMModuleInstanceExtra {
     WASMFunctionInstance *retain_function;
 
     RunningMode running_mode;
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* The exec env of the innermost call into the module instance that
+       is running, NULL if there is none */
+    WASMExecEnv *running_exec_env;
+#endif
 
 #if WASM_ENABLE_MULTI_MODULE != 0
     bh_list sub_module_inst_list_head;

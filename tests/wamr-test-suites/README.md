@@ -59,13 +59,14 @@ Run unit tests with the selected runtime mode:
 ./test_wamr.sh -s unit -t fast-interp
 ./test_wamr.sh -s unit -t jit
 ./test_wamr.sh -s unit -t aot
+./test_wamr.sh -s unit -t fast-jit
+./test_wamr.sh -s unit -t multi-tier-jit
 ```
 
 The `jit` option maps to the `llvm-jit` unit-test mode. Each mode is configured
 and built in a separate `workspace/unittest-build-<mode>` directory, and the
 results are appended to the unit test report. If `-t` is omitted, the script
-processes all configured modes. `fast-jit` and `multi-tier-jit` are skipped
-successfully because no unit test cases currently support them.
+processes all configured modes.
 
 Use `-U` to include the full `llm-enhanced-test` suite and `-C` to collect code
 coverage:

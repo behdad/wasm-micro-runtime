@@ -1687,6 +1687,9 @@ void
 wasm_runtime_instantiation_args_set_defaults(struct InstantiationArgs2 *args)
 {
     memset(args, 0, sizeof(*args));
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    args->instruction_count_limit = -1;
+#endif
 #if WASM_ENABLE_LIBC_WASI != 0
     wasi_args_set_defaults(&args->wasi);
 #endif
@@ -1762,6 +1765,15 @@ wasm_runtime_instantiation_args_set_custom_data(struct InstantiationArgs2 *p,
 {
     p->custom_data = custom_data;
 }
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+void
+wasm_runtime_instantiation_args_set_instruction_count_limit(
+    struct InstantiationArgs2 *p, int64 instruction_count)
+{
+    p->instruction_count_limit = instruction_count;
+}
+#endif
 
 #if WASM_ENABLE_LIBC_WASI != 0
 void
@@ -2568,7 +2580,54 @@ wasm_runtime_set_instruction_count_limit(WASMExecEnv *exec_env,
 {
     exec_env->instructions_to_execute = instructions_to_execute;
 }
+
+void
+wasm_runtime_set_instruction_count_limit64(WASMExecEnv *exec_env,
+                                           int64 instructions_to_execute)
+{
+    exec_env->instructions_to_execute = instructions_to_execute;
+}
+
+int64
+wasm_runtime_get_instruction_count_limit(WASMModuleInstanceCommon *module_inst)
+{
+    WASMModuleInstanceExtraCommon *common = NULL;
+
+#if WASM_ENABLE_INTERP != 0
+    if (module_inst->module_type == Wasm_Module_Bytecode
+        && ((WASMModuleInstance *)module_inst)->e)
+        common = &((WASMModuleInstance *)module_inst)->e->common;
 #endif
+#if WASM_ENABLE_AOT != 0
+    if (module_inst->module_type == Wasm_Module_AoT
+        && ((AOTModuleInstance *)module_inst)->e)
+        common =
+            &((AOTModuleInstanceExtra *)((AOTModuleInstance *)module_inst)->e)
+                 ->common;
+#endif
+    return common ? common->instruction_count_limit : -1;
+}
+#endif
+
+bool
+wasm_runtime_is_instruction_count_limit_enforced(
+    WASMModuleInstanceCommon *module_inst)
+{
+#if WASM_ENABLE_INSTRUCTION_METERING != 0 && WASM_ENABLE_INTERP != 0
+    if (module_inst->module_type == Wasm_Module_Bytecode) {
+        RunningMode running_mode = wasm_runtime_get_running_mode(module_inst);
+
+        /* The interpreters and the code of Fast JIT count the
+           instructions. The code of LLVM JIT doesn't, and in Multi-tier
+           JIT mode the functions are handed over to it one by one. */
+        return running_mode == Mode_Interp || running_mode == Mode_Fast_JIT;
+    }
+#else
+    (void)module_inst;
+#endif
+    /* AOT code ignores the limit */
+    return false;
+}
 
 WASMFuncType *
 wasm_runtime_get_function_type(const WASMFunctionInstanceCommon *function,
@@ -3358,6 +3417,9 @@ static const char *exception_msgs[] = {
     "create stringview failed",       /* EXCE_FAILED_TO_CREATE_STRINGVIEW */
     "encode failed",                  /* EXCE_FAILED_TO_ENCODE_STRING */
     "",                               /* EXCE_ALREADY_THROWN */
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    "instruction limit exceeded",     /* EXCE_INSTRUCTION_LIMIT_EXCEEDED */
+#endif
 };
 /* clang-format on */
 

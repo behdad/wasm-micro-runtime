@@ -6,6 +6,7 @@
 #include "jit_emit_memory.h"
 #include "jit_emit_exception.h"
 #include "jit_emit_function.h"
+#include "jit_emit_metering.h"
 #include "../jit_frontend.h"
 #include "../jit_codegen.h"
 #include "../../interpreter/wasm_runtime.h"
@@ -635,6 +636,11 @@ wasm_init_memory(WASMModuleInstance *inst, uint32 mem_idx, uint32 seg_idx,
     uint8 *mem_addr, *data_addr;
     uint32 seg_len;
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    if (!jit_metering_count_bytes(inst, len))
+        return -1;
+#endif
+
     /* if d + n > the length of mem.data */
     mem_inst = inst->memories[mem_idx];
     mem_size = mem_inst->cur_page_count * (uint64)mem_inst->num_bytes_per_page;
@@ -725,6 +731,11 @@ wasm_copy_memory(WASMModuleInstance *inst, uint32 src_mem_idx,
     uint64 src_mem_size, dst_mem_size;
     uint8 *src_addr, *dst_addr;
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    if (!jit_metering_count_bytes(inst, len))
+        return -1;
+#endif
+
     src_mem = inst->memories[src_mem_idx];
     dst_mem = inst->memories[dst_mem_idx];
     src_mem_size =
@@ -791,6 +802,11 @@ wasm_fill_memory(WASMModuleInstance *inst, uint32 mem_idx, uint32 len,
     WASMMemoryInstance *mem_inst;
     uint64 mem_size;
     uint8 *dst_addr;
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    if (!jit_metering_count_bytes(inst, len))
+        return -1;
+#endif
 
     mem_inst = inst->memories[mem_idx];
     mem_size = mem_inst->cur_page_count * (uint64)mem_inst->num_bytes_per_page;

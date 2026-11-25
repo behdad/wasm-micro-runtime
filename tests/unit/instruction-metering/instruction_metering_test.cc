@@ -46,6 +46,11 @@ class InstructionMeteringTest : public testing::Test
         module_inst = wasm_runtime_instantiate(module, 8192, 0, error_buf,
                                                sizeof(error_buf));
         ASSERT_NE(module_inst, nullptr) << error_buf;
+        /* The default running mode may be one that ignores the limit */
+        if (!wasm_runtime_is_instruction_count_limit_enforced(module_inst)) {
+            ASSERT_TRUE(
+                wasm_runtime_set_running_mode(module_inst, Mode_Interp));
+        }
         exec_env = wasm_runtime_create_exec_env(module_inst, 8192);
         ASSERT_NE(exec_env, nullptr);
     }

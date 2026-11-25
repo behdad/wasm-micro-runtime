@@ -559,6 +559,11 @@ wasm_cluster_spawn_exec_env(WASMExecEnv *exec_env)
     new_exec_env->suspend_flags.flags =
         (exec_env->suspend_flags.flags & WASM_SUSPEND_FLAG_INHERIT_MASK);
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* Inherit the instruction count limit of parent thread */
+    new_exec_env->instructions_to_execute = exec_env->instructions_to_execute;
+#endif
+
     if (!wasm_cluster_add_exec_env(cluster, new_exec_env)) {
         goto fail3;
     }
@@ -702,6 +707,9 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
     WASMCluster *cluster;
     WASMExecEnv *new_exec_env;
     korp_tid tid;
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    int64 instructions_left = wasm_exec_env_get_instructions_left(exec_env);
+#endif
 
     cluster = wasm_exec_env_get_cluster(exec_env);
     bh_assert(cluster);
@@ -736,6 +744,13 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
     new_exec_env->suspend_flags.flags =
         (exec_env->suspend_flags.flags & WASM_SUSPEND_FLAG_INHERIT_MASK);
 
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* The thread gets half of the instructions that the call which
+       creates it has left, if that has an instruction count limit */
+    new_exec_env->instructions_to_execute =
+        instructions_left >= 0 ? instructions_left / 2 : -1;
+#endif
+
     if (!wasm_cluster_add_exec_env(cluster, new_exec_env))
         goto fail2;
 
@@ -758,6 +773,15 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
     os_mutex_unlock(&new_exec_env->wait_lock);
 
     os_mutex_unlock(&cluster->lock);
+
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+    /* and the call goes on with the other half: the threads that a
+       module creates don't run more instructions together than the
+       limit allowed the call that created them */
+    if (instructions_left >= 0)
+        wasm_exec_env_set_instructions_left(
+            exec_env, instructions_left - (instructions_left / 2));
+#endif
 
     return 0;
 
